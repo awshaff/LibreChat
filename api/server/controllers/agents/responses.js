@@ -12,6 +12,7 @@ const {
 const {
   createRun,
   applyContextToAgent,
+  buildProjectContext,
   buildInitialToolSessions,
   buildRunToolSet,
   AgentRunEnvelopeError,
@@ -1017,6 +1018,10 @@ const executeResponse = async (envelope, { req, res }) => {
 
       const mcpManager = getMCPManager();
       const configServers = await resolveConfigServers(req);
+      const chatProjectId = req.body?.chatProjectId;
+      const projectContext = chatProjectId
+        ? buildProjectContext(await db.getChatProject(principal.userId, chatProjectId))
+        : undefined;
 
       await Promise.all(
         modelBoundAgents.map(async (runAgent) => {
@@ -1036,6 +1041,7 @@ const executeResponse = async (envelope, { req, res }) => {
             sharedRunContext: [memoryContext, agentScopedContext.get(runAgent.id)]
               .filter(Boolean)
               .join('\n\n'),
+            projectContext: runAgent.id === primaryConfig.id ? projectContext : undefined,
           });
         }),
       );
