@@ -41,6 +41,7 @@ const {
   processFileUpload,
   processDeleteRequest,
   processAgentFileUpload,
+  processProjectFileUpload,
 } = require('~/server/services/Files/process');
 const {
   resolveEffectiveToolResource,
@@ -148,6 +149,50 @@ router.get('/agent/:agent_id', async (req, res) => {
   } catch (error) {
     logger.error('[/files/agent/:agent_id] Error fetching agent files:', error);
     res.status(500).json({ error: 'Failed to fetch agent files' });
+  }
+});
+
+/**
+ * Get files specific to a project
+ * @route GET /files/project/:project_id
+ * @param {string} project_id - The project ID to get files for
+ * @returns {Promise<TFile[]>} Array of files attached to the project
+ */
+router.get('/project/:project_id', async (req, res) => {
+  try {
+    const { project_id } = req.params;
+    const userId = req.user.id;
+
+    if (!project_id) {
+      return res.status(400).json({ error: 'Project ID is required' });
+    }
+
+    const project = await db.getChatProject(userId, project_id);
+    if (!project) {
+      return res.status(200).json([]);
+    }
+
+    const projectFileIds = new Set();
+    if (project.tool_resources) {
+      for (const [, resource] of Object.entries(project.tool_resources)) {
+        if (resource?.file_ids && Array.isArray(resource.file_ids)) {
+          resource.file_ids.forEach((fileId) => projectFileIds.add(fileId));
+        }
+      }
+    }
+
+    if (projectFileIds.size === 0) {
+      return res.status(200).json([]);
+    }
+
+    const files = await db.getFiles({ file_id: { $in: [...projectFileIds] } }, null, {
+      text: 0,
+    });
+
+    res.status(200).json(files);
+  } catch (error) {
+    logger.error('[/files/project/:project_id] Error fetching project files:', error);
+    res.status(500).json({ error: 'Failed to fetch project files' });
   }
 });
 
@@ -259,6 +304,37 @@ router.delete('/', async (req, res) => {
         files: agentFiles,
       });
       res.status(200).json({ message: 'File associations removed successfully from agent' });
+      return;
+    }
+
+    if (req.body.project_id && req.body.tool_resource) {
+      if (
+        req.body.tool_resource !== EToolResources.file_search &&
+        req.body.tool_resource !== EToolResources.context
+      ) {
+        return res.status(400).json({ message: 'Invalid project tool resource' });
+      }
+
+      const project = await db.getChatProject(req.user.id, req.body.project_id);
+      if (!project) {
+        return res.status(404).json({ message: 'Project not found' });
+      }
+
+      const toolResourceFiles = project.tool_resources?.[req.body.tool_resource]?.file_ids ?? [];
+      const projectFiles = files
+        .filter((f) => toolResourceFiles.includes(f.file_id))
+        .map((file) => ({ tool_resource: req.body.tool_resource, file_id: file.file_id }));
+      if (projectFiles.length === 0) {
+        res.status(200).json({ message: 'File associations removed successfully from project' });
+        return;
+      }
+
+      await db.removeProjectResourceFiles({
+        user: req.user.id,
+        projectId: req.body.project_id,
+        files: projectFiles,
+      });
+      res.status(200).json({ message: 'File associations removed successfully from project' });
       return;
     }
 
@@ -868,6 +944,11 @@ const handleFileUpload = async (req, res) => {
         sseStream,
         openai: legacyAssistantUpload.openai,
       });
+    }
+
+    if (metadata.project_id) {
+      openSseStreamIfRequested();
+      return await processProjectFileUpload({ req, res, metadata, sseStream });
     }
 
     openSseStreamIfRequested();

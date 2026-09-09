@@ -25,6 +25,7 @@ export default function FileRow({
   setFilesLoading,
   assistant_id,
   agent_id,
+  project_id,
   tool_resource,
   index,
   fileFilter,
@@ -42,6 +43,7 @@ export default function FileRow({
   fileFilter?: (file: ExtendedFile) => boolean;
   assistant_id?: string;
   agent_id?: string;
+  project_id?: string;
   tool_resource?: EToolResources;
   index?: number;
   isRTL?: boolean;
@@ -67,8 +69,9 @@ export default function FileRow({
     onMutate: async () =>
       logger.log(
         'agents',
-        'Deleting files: agent_id, assistant_id, tool_resource',
+        'Deleting files: agent_id, project_id, assistant_id, tool_resource',
         agent_id,
+        project_id,
         assistant_id,
         tool_resource,
       ),
@@ -83,6 +86,7 @@ export default function FileRow({
   const { deleteFile } = useFileDeletion({
     mutateAsync,
     agent_id,
+    project_id,
     assistant_id,
     tool_resource,
     index,

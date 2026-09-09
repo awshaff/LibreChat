@@ -1799,6 +1799,8 @@
   "com_ui_project_count_single": "1 project",
   "com_ui_project_create_error": "Failed to create project",
   "com_ui_project_delete_error": "Failed to delete project",
+  "com_ui_project_knowledge": "Knowledge",
+  "com_ui_project_knowledge_info": "Files added here are available as context in every chat within this project.",
   "com_ui_project_name": "Project name",
   "com_ui_project_name_placeholder": "New project",
   "com_ui_project_not_found": "Project not found",

@@ -39,6 +39,10 @@ const chatProjectSchema: Schema<IChatProjectDocument> = new Schema<IChatProjectD
       type: String,
       index: true,
     },
+    tool_resources: {
+      type: Schema.Types.Mixed,
+      default: {},
+    },
   },
   { timestamps: true },
 );
