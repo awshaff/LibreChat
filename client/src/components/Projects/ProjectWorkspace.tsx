@@ -13,7 +13,6 @@ import OpenSidebar from '~/components/Chat/Menus/OpenSidebar';
 import ProjectDeleteDialog from './ProjectDeleteDialog';
 import ProjectEditDialog from './ProjectEditDialog';
 import { useLocalize, useNewConvo } from '~/hooks';
-import ProjectKnowledge from './ProjectKnowledge';
 import { cn, clearMessagesCache } from '~/utils';
 import ProjectChatList from './ProjectChatList';
 import store from '~/store';
@@ -231,8 +230,6 @@ export default function ProjectWorkspace() {
             {localize('com_ui_new_chat_in_project', { name: project.name })}
           </span>
         </button>
-
-        <ProjectKnowledge projectId={project._id} />
 
         <section className="mt-8 flex min-h-0 flex-1 flex-col">
           <div className="mb-3 flex items-center justify-between gap-3">

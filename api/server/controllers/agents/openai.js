@@ -13,7 +13,6 @@ const {
   createRun,
   createChunk,
   applyContextToAgent,
-  buildProjectContext,
   buildRunToolSet,
   buildInitialToolSessions,
   buildAgentScopedContext,
@@ -1081,10 +1080,6 @@ const executeOpenAIChatCompletion = async (envelope, { req, res }) => {
       });
       const mcpManager = getMCPManager();
       const configServers = await resolveConfigServers(req);
-      const chatProjectId = req.body?.chatProjectId;
-      const projectContext = chatProjectId
-        ? buildProjectContext(await db.getChatProject(userId, chatProjectId))
-        : undefined;
       await Promise.all(
         contextAgents.map(async (runAgent) => {
           const memoryContext = await buildInlineMemoryContext({
@@ -1103,7 +1098,6 @@ const executeOpenAIChatCompletion = async (envelope, { req, res }) => {
             sharedRunContext: [memoryContext, agentScopedContext.get(runAgent.id)]
               .filter(Boolean)
               .join('\n\n'),
-            projectContext: runAgent.id === primaryConfig.id ? projectContext : undefined,
           });
         }),
       );

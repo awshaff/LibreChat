@@ -29,23 +29,19 @@ const fileSearchJsonSchema = {
  * @param {Agent['tool_resources']} options.tool_resources
  * @param {string} [options.agentId] - The agent ID for file access control
  * @param {string} [options.agentResourceType] - Permission resource type for the authorized agent route
- * @param {string} [options.projectId] - The chat project ID whose knowledge file_ids are merged in
- * @param {string[]} [options.projectFileIds] - The project's `tool_resources.file_search.file_ids`
  * @returns {Promise<{
- *   files: Array<{ file_id: string; filename: string; fromAgent: boolean; entity_id?: string }>,
+ *   files: Array<{ file_id: string; filename: string; fromAgent: boolean }>,
  *   toolContext: string
  * }>}
  */
 const primeFiles = async (options) => {
-  const { tool_resources, req, agentId, agentResourceType, projectId, projectFileIds } = options;
+  const { tool_resources, req, agentId, agentResourceType } = options;
   const file_ids = tool_resources?.[EToolResources.file_search]?.file_ids ?? [];
   const agentResourceIds = new Set(file_ids);
-  const projectResourceIds = new Set(projectId ? (projectFileIds ?? []) : []);
   const resourceFiles = tool_resources?.[EToolResources.file_search]?.files ?? [];
 
-  // Get all files first (agent knowledge + project knowledge)
-  const allFileIds = [...new Set([...file_ids, ...projectResourceIds])];
-  const allFiles = (await getFiles({ file_id: { $in: allFileIds } }, null, { text: 0 })) ?? [];
+  // Get all files first
+  const allFiles = (await getFiles({ file_id: { $in: file_ids } }, null, { text: 0 })) ?? [];
 
   // Filter by access if user and agent are provided
   let dbFiles;
@@ -74,16 +70,13 @@ const primeFiles = async (options) => {
     if (i === 0) {
       toolContext = `- Note: Use the ${Tools.file_search} tool to find relevant information within:`;
     }
-    const isProjectFile = projectResourceIds.has(file.file_id);
     toolContext += `\n\t- ${file.filename}${
-      agentResourceIds.has(file.file_id) || isProjectFile ? '' : ' (just attached by user)'
+      agentResourceIds.has(file.file_id) ? '' : ' (just attached by user)'
     }`;
     files.push({
       file_id: file.file_id,
       filename: file.filename,
       fromAgent: agentResourceIds.has(file.file_id),
-      /** RAG queries for this file must scope to the project's entity_id, not the agent's. */
-      entity_id: isProjectFile ? projectId : undefined,
     });
   }
 
@@ -118,7 +111,7 @@ const createFileSearchTool = async ({
       }
 
       /**
-       * @param {import('librechat-data-provider').TFile & { fromAgent?: boolean; entity_id?: string }} file
+       * @param {import('librechat-data-provider').TFile & { fromAgent?: boolean }} file
        * @returns {{ file_id: string, query: string, k: number, entity_id?: string }}
        */
       const createQueryBody = (file) => {
@@ -128,17 +121,16 @@ const createFileSearchTool = async ({
           k: 5,
         };
         // User-attached files are embedded under the user id (no entity);
-        // only knowledge-base files (agent or project) carry an entity_id.
+        // only agent knowledge-base files carry the agent's entity_id.
         // Sending entity_id for user attachments makes the RAG API's entity
-        // filter return no results for them. `file.entity_id` (set by
-        // primeFiles for project knowledge) takes precedence over the
-        // tool-wide `entity_id` (the agent's), since a single search can mix
-        // files embedded under different entities.
-        const fileEntityId = file.entity_id ?? (file.fromAgent === true ? entity_id : undefined);
-        if (!fileEntityId) {
+        // filter return no results for them. When files are provided by
+        // primeFiles, fromAgent is always set; for callers that pass files
+        // directly without the flag, the safe default is unscoped (no
+        // entity_id).
+        if (!entity_id || file.fromAgent !== true) {
           return body;
         }
-        body.entity_id = fileEntityId;
+        body.entity_id = entity_id;
         logger.debug(`[${Tools.file_search}] RAG API /query body`, body);
         return body;
       };

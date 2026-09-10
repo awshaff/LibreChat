@@ -1,20 +1,10 @@
-import { Constants, EToolResources } from 'librechat-data-provider';
+import { Constants } from 'librechat-data-provider';
 import { DynamicStructuredTool } from '@librechat/agents/langchain/tools';
-import type { Agent, AgentToolResources, TEphemeralAgent } from 'librechat-data-provider';
-import type { IChatProject } from '@librechat/data-schemas';
+import type { Agent, TEphemeralAgent } from 'librechat-data-provider';
 import type { LCTool } from '@librechat/agents';
 import type { Logger } from 'winston';
 import type { ParsedServerConfig } from '~/mcp/types';
 import type { MCPManager } from '~/mcp/MCPManager';
-
-/** Resolved knowledge from the Project a conversation is scoped to, already
- *  fetched by the caller — this module stays DB-free. */
-export type ProjectContext = {
-  /** Short instructions text (e.g. project name/description) merged into the agent's instructions. */
-  instructions?: string;
-  /** `tool_resources.context.file_ids` from the project's knowledge, merged into the agent's own. */
-  contextFileIds?: string[];
-};
 
 /**
  * Agent type with optional tools array that can contain DynamicStructuredTool or string.
@@ -101,64 +91,23 @@ export async function getMCPInstructionsForServers(
 
 /**
  * Builds stable instructions for an agent by combining agent-specific context and MCP context.
- * Order: baseInstructions -> mcpInstructions -> projectInstructions
+ * Order: baseInstructions -> mcpInstructions
  *
  * @param {Object} params
  * @param {string} [params.baseInstructions] - Agent's base instructions
  * @param {string} [params.mcpInstructions] - Agent's MCP server instructions
- * @param {string} [params.projectInstructions] - The conversation's Project instructions, if any
  * @returns {string | undefined} Combined instructions, or undefined if empty
  */
 export function buildAgentInstructions({
   baseInstructions,
   mcpInstructions,
-  projectInstructions,
 }: {
   baseInstructions?: string;
   mcpInstructions?: string;
-  projectInstructions?: string;
 }): string | undefined {
-  const parts = [baseInstructions, mcpInstructions, projectInstructions].filter(Boolean);
+  const parts = [baseInstructions, mcpInstructions].filter(Boolean);
   const combined = parts.join('\n\n').trim();
   return combined || undefined;
-}
-
-/**
- * Turns a resolved `ChatProject` document into the plain context this module merges
- * into an agent's instructions and `tool_resources.context`. Pure transform — fetching
- * the project itself is the caller's responsibility.
- */
-export function buildProjectContext(
-  project?: Pick<IChatProject, 'name' | 'description' | 'tool_resources'> | null,
-): ProjectContext | undefined {
-  if (!project) {
-    return undefined;
-  }
-  const instructions = [`Project: ${project.name}`, project.description].filter(Boolean).join('\n');
-  const contextFileIds = project.tool_resources?.context?.file_ids;
-  if (!instructions && (!contextFileIds || contextFileIds.length === 0)) {
-    return undefined;
-  }
-  return { instructions: instructions || undefined, contextFileIds };
-}
-
-/**
- * Merges a Project's knowledge `file_ids` into the agent's own `tool_resources.context`,
- * so `primeResources` (which reads that field) picks them up without any changes of its
- * own — full-text context injection has no per-entity scoping concern, unlike file_search.
- * Mutates the agent object in place.
- */
-export function mergeProjectContextFiles(agent: AgentWithTools, contextFileIds?: string[]): void {
-  if (!contextFileIds || contextFileIds.length === 0) {
-    return;
-  }
-  const toolResources = (agent.tool_resources ?? {}) as AgentToolResources;
-  const existing = toolResources[EToolResources.context]?.file_ids ?? [];
-  toolResources[EToolResources.context] = {
-    ...toolResources[EToolResources.context],
-    file_ids: Array.from(new Set([...existing, ...contextFileIds])),
-  };
-  agent.tool_resources = toolResources;
 }
 
 /**
@@ -198,7 +147,6 @@ export async function applyContextToAgent({
   agentId,
   logger,
   configServers,
-  projectContext,
 }: {
   agent: AgentWithTools;
   sharedRunContext: string;
@@ -207,12 +155,9 @@ export async function applyContextToAgent({
   agentId?: string;
   logger?: Logger;
   configServers?: Record<string, ParsedServerConfig>;
-  /** The Project a conversation is scoped to, already resolved by the caller. */
-  projectContext?: ProjectContext;
 }): Promise<void> {
   const baseInstructions = agent.instructions || '';
   const additionalInstructions = agent.additional_instructions || '';
-  mergeProjectContextFiles(agent, projectContext?.contextFileIds);
 
   try {
     const mcpServers = ephemeralAgent?.mcp?.length ? ephemeralAgent.mcp : extractMCPServers(agent);
@@ -226,7 +171,6 @@ export async function applyContextToAgent({
     agent.instructions = buildAgentInstructions({
       baseInstructions,
       mcpInstructions,
-      projectInstructions: projectContext?.instructions,
     });
     agent.additional_instructions = buildAgentAdditionalInstructions({
       additionalInstructions,
@@ -240,7 +184,6 @@ export async function applyContextToAgent({
     agent.instructions = buildAgentInstructions({
       baseInstructions,
       mcpInstructions: '',
-      projectInstructions: projectContext?.instructions,
     });
     agent.additional_instructions = buildAgentAdditionalInstructions({
       additionalInstructions,

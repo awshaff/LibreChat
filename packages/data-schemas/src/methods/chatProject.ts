@@ -1,7 +1,6 @@
 import {
   MAX_CHAT_PROJECT_NAME_LENGTH,
   MAX_CHAT_PROJECT_DESCRIPTION_LENGTH,
-  EToolResources,
 } from 'librechat-data-provider';
 import type { FilterQuery, Model, SortOrder, Types } from 'mongoose';
 import type { IChatProject, IChatProjectDocument, IConversation } from '~/types';
@@ -44,14 +43,6 @@ export type AssignConversationToProjectResult = {
   projectId: string | null;
 };
 
-/** The subset of `EToolResources` that carries knowledge file_ids on a `ChatProject`. */
-export type ProjectToolResource = EToolResources.file_search | EToolResources.context;
-
-export type ProjectResourceFile = {
-  tool_resource: ProjectToolResource;
-  file_id: string;
-};
-
 export interface ChatProjectMethods {
   createChatProject(user: string, input: CreateChatProjectInput): Promise<IChatProject>;
   getChatProject(user: string, projectId: string): Promise<IChatProject | null>;
@@ -71,20 +62,6 @@ export interface ChatProjectMethods {
     projectId: string | null,
   ): Promise<AssignConversationToProjectResult | null>;
   refreshChatProjectStats(user: string, projectId: string): Promise<IChatProject | null>;
-  addProjectResourceFile(params: {
-    user: string;
-    projectId: string;
-    tool_resource: ProjectToolResource;
-    file_id: string;
-  }): Promise<IChatProject>;
-  removeProjectResourceFiles(params: {
-    user: string;
-    projectId: string;
-    files: ProjectResourceFile[];
-  }): Promise<IChatProject>;
-  removeProjectResourceFilesFromAllProjects(
-    file_ids: string[],
-  ): Promise<{ matchedCount: number; modifiedCount: number }>;
 }
 
 type ProjectCursor = {
@@ -100,10 +77,6 @@ type ProjectStatsSnapshot = Pick<
 
 const VALID_SORT_FIELDS = new Set<ChatProjectSortBy>(['name', 'createdAt', 'lastConversationAt']);
 const PROJECT_STATS_REFRESH_MAX_ATTEMPTS = 8;
-const PROJECT_TOOL_RESOURCE_KEYS: ReadonlyArray<ProjectToolResource> = [
-  EToolResources.file_search,
-  EToolResources.context,
-];
 
 function normalizeSortBy(sortBy?: string): ChatProjectSortBy {
   return VALID_SORT_FIELDS.has(sortBy as ChatProjectSortBy)
@@ -552,115 +525,6 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
     return await refreshChatProjectStatsForUser(mongoose, user, projectId);
   }
 
-  async function addProjectResourceFile({
-    user,
-    projectId,
-    tool_resource,
-    file_id,
-  }: {
-    user: string;
-    projectId: string;
-    tool_resource: ProjectToolResource;
-    file_id: string;
-  }): Promise<IChatProject> {
-    if (!isValidObjectIdString(projectId)) {
-      throw new Error('Project not found for adding resource file');
-    }
-
-    const ChatProject = mongoose.models.ChatProject as Model<IChatProjectDocument>;
-    const projectFilter = { _id: new mongoose.Types.ObjectId(projectId), user };
-    const fileIdsPath = `tool_resources.${tool_resource}.file_ids`;
-
-    await ChatProject.updateOne(
-      { ...projectFilter, [fileIdsPath]: { $exists: false } },
-      { $set: { [fileIdsPath]: [] } },
-    );
-
-    const updatedProject = await ChatProject.findOneAndUpdate(
-      projectFilter,
-      { $addToSet: { [fileIdsPath]: file_id } },
-      { new: true },
-    ).lean<IChatProject>();
-
-    if (!updatedProject) {
-      throw new Error('Project not found for adding resource file');
-    }
-    return updatedProject;
-  }
-
-  async function removeProjectResourceFiles({
-    user,
-    projectId,
-    files,
-  }: {
-    user: string;
-    projectId: string;
-    files: ProjectResourceFile[];
-  }): Promise<IChatProject> {
-    if (!isValidObjectIdString(projectId)) {
-      throw new Error('Project not found for removing resource files');
-    }
-
-    const ChatProject = mongoose.models.ChatProject as Model<IChatProjectDocument>;
-    const projectFilter = { _id: new mongoose.Types.ObjectId(projectId), user };
-
-    const filesByResource = files.reduce<Record<string, string[]>>(
-      (acc, { tool_resource, file_id }) => {
-        if (!acc[tool_resource]) {
-          acc[tool_resource] = [];
-        }
-        acc[tool_resource].push(file_id);
-        return acc;
-      },
-      {},
-    );
-
-    const pullAllOps: Record<string, string[]> = {};
-    for (const [resource, fileIds] of Object.entries(filesByResource)) {
-      pullAllOps[`tool_resources.${resource}.file_ids`] = fileIds;
-    }
-
-    const updatedProject = await ChatProject.findOneAndUpdate(
-      projectFilter,
-      { $pullAll: pullAllOps },
-      { new: true },
-    ).lean<IChatProject>();
-
-    if (!updatedProject) {
-      throw new Error('Project not found for removing resource files');
-    }
-    return updatedProject;
-  }
-
-  /**
-   * Removes the given file_ids from every project's `tool_resources.*.file_ids`
-   * so file deletion cannot leave orphaned stubs behind, mirroring the same fix
-   * applied to agents (see issue #12776).
-   */
-  async function removeProjectResourceFilesFromAllProjects(
-    file_ids: string[],
-  ): Promise<{ matchedCount: number; modifiedCount: number }> {
-    if (!file_ids || file_ids.length === 0) {
-      return { matchedCount: 0, modifiedCount: 0 };
-    }
-
-    const ChatProject = mongoose.models.ChatProject as Model<IChatProjectDocument>;
-
-    const orQuery = PROJECT_TOOL_RESOURCE_KEYS.map((key) => ({
-      [`tool_resources.${key}.file_ids`]: { $in: file_ids },
-    }));
-    const pullAllOps = PROJECT_TOOL_RESOURCE_KEYS.reduce<Record<string, string[]>>((acc, key) => {
-      acc[`tool_resources.${key}.file_ids`] = file_ids;
-      return acc;
-    }, {});
-
-    const result = await ChatProject.updateMany({ $or: orQuery }, { $pullAll: pullAllOps });
-    return {
-      matchedCount: result.matchedCount ?? 0,
-      modifiedCount: result.modifiedCount ?? 0,
-    };
-  }
-
   return {
     createChatProject,
     getChatProject,
@@ -669,8 +533,5 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
     deleteChatProject,
     assignConversationToProject,
     refreshChatProjectStats,
-    addProjectResourceFile,
-    removeProjectResourceFiles,
-    removeProjectResourceFilesFromAllProjects,
   };
 }

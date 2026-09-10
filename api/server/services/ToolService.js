@@ -114,7 +114,7 @@ const { createOpenIDSessionTokenProvider } = require('~/server/services/OpenIDSe
 const { getMCPRequestContext } = require('~/server/services/MCPRequestContext');
 const { recordUsage } = require('~/server/services/Threads');
 const { loadTools } = require('~/app/clients/tools/util');
-const { findPluginAuthsByKeys, getRoleByName, getChatProject } = require('~/models');
+const { findPluginAuthsByKeys, getRoleByName } = require('~/models');
 const { getFlowStateManager, getMCPServersRegistry } = require('~/config');
 const { getLogStores } = require('~/cache');
 
@@ -1722,17 +1722,6 @@ async function loadAgentTools({
     getAppConfig,
   });
 
-  /** Merges the request's Project knowledge (if any) into the file_search tool's
-   *  RAG scope alongside the agent's own knowledge files. Resolved once here
-   *  rather than per-tool since both file_search and future project-scoped
-   *  tools would otherwise repeat the same lookup. */
-  const chatProjectId = runtimeRequestBody?.chatProjectId;
-  let projectFileIds;
-  if (chatProjectId) {
-    const project = await getChatProject(req.user.id, chatProjectId);
-    projectFileIds = project?.tool_resources?.[EToolResources.file_search]?.file_ids;
-  }
-
   const { loadedTools, toolContextMap, dynamicToolContextMap, primedCodeFiles } = await loadTools({
     agent,
     signal,
@@ -1755,8 +1744,6 @@ async function loadAgentTools({
       mcpPermissionContext,
       requestScopedConnections: getMCPRequestContext(req, res),
       codeExecutionContext,
-      projectId: chatProjectId,
-      projectFileIds,
       [Tools.web_search]: webSearchCallbacks,
     },
     webSearch: appConfig.webSearch,

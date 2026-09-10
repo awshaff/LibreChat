@@ -537,10 +537,6 @@ export const getAgentFiles = (agentId: string): Promise<f.TFile[]> => {
   return request.get(endpoints.agentFiles(agentId));
 };
 
-export const getProjectFiles = (projectId: string): Promise<f.TFile[]> => {
-  return request.get(endpoints.projectFiles(projectId));
-};
-
 export const getFileConfig = (): Promise<TFileConfig> => {
   return request.get(`${endpoints.files()}/config`);
 };
@@ -876,7 +872,6 @@ export const getCodeOutputDownload = async (url: string): Promise<AxiosResponse>
 export const deleteFiles = async (payload: {
   files: f.BatchFile[];
   agent_id?: string;
-  project_id?: string;
   assistant_id?: string;
   tool_resource?: a.EToolResources;
 }): Promise<f.DeleteFilesResponse> =>
