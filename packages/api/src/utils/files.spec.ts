@@ -591,6 +591,28 @@ describe('resolveUploadErrorMessage', () => {
     expect(result).not.toContain('PRIVATE-UPLOAD');
   });
 
+  test('preserves the capability-disabled message for file search', () => {
+    expect(resolveUploadErrorMessage({ message: 'File search is not enabled for Agents' })).toBe(
+      'File search is not enabled for Agents',
+    );
+  });
+
+  test('maps the capability-disabled message for file search when redaction is enabled', () => {
+    expect(
+      resolveUploadErrorMessage(
+        { message: 'File search is not enabled for Agents' },
+        undefined,
+        true,
+      ),
+    ).toBe('File search is not enabled for this deployment');
+  });
+
+  test('preserves the project-not-found message', () => {
+    expect(
+      resolveUploadErrorMessage({ message: 'Project not found for project file upload' }),
+    ).toBe('Project not found for project file upload');
+  });
+
   test('accepts a custom default message', () => {
     expect(resolveUploadErrorMessage(null, 'Custom default')).toBe('Custom default');
   });
