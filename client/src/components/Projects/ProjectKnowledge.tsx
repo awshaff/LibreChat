@@ -6,12 +6,14 @@ import {
   getEndpointFileConfig,
 } from 'librechat-data-provider';
 import type { TFile } from 'librechat-data-provider';
+import type { DragEvent } from 'react';
 import type { ExtendedFile } from '~/common';
 import DropzoneContent, { dropzoneClassName } from '~/components/SidePanel/Agents/UploadDropzone';
 import FileRow, { FileRowWrapper } from '~/components/Chat/Input/Files/FileRow';
 import { useFileHandlingNoChatContext } from '~/hooks/Files/useFileHandling';
 import { useProjectFilesQuery, useGetFileConfig } from '~/data-provider';
 import { useLocalize, useLazyEffect } from '~/hooks';
+import { cn } from '~/utils';
 
 const toExtendedFile = (file: TFile): ExtendedFile => ({
   file_id: file.file_id,
@@ -53,7 +55,7 @@ export default function ProjectKnowledge({ projectId }: { projectId: string }) {
     750,
   );
 
-  const { handleFileChange } = useFileHandlingNoChatContext(
+  const { handleFileChange, handleFiles } = useFileHandlingNoChatContext(
     {
       additionalMetadata: { project_id: projectId, tool_resource: EToolResources.file_search },
       endpointOverride: EModelEndpoint.agents,
@@ -64,12 +66,52 @@ export default function ProjectKnowledge({ projectId }: { projectId: string }) {
   );
 
   const isUploadDisabled = endpointFileConfig?.disabled ?? false;
+  const [isDragActive, setIsDragActive] = useState(false);
+  const dragCounterRef = useRef(0);
 
   const handleLocalFileClick = () => {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
     fileInputRef.current?.click();
+  };
+
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (isUploadDisabled) {
+      return;
+    }
+    dragCounterRef.current += 1;
+    setIsDragActive(true);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) {
+      setIsDragActive(false);
+    }
+  };
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDragActive(false);
+    if (isUploadDisabled) {
+      return;
+    }
+    const droppedFiles = event.dataTransfer.files;
+    if (droppedFiles.length > 0) {
+      handleFiles(droppedFiles);
+    }
   };
 
   return (
@@ -89,8 +131,20 @@ export default function ProjectKnowledge({ projectId }: { projectId: string }) {
           Wrapper={FileRowWrapper}
         />
         {isUploadDisabled ? null : (
-          <div>
-            <button type="button" className={dropzoneClassName} onClick={handleLocalFileClick}>
+          <div
+            onDragEnter={handleDragEnter}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            <button
+              type="button"
+              className={cn(
+                dropzoneClassName,
+                isDragActive && 'border-border-heavy bg-surface-hover',
+              )}
+              onClick={handleLocalFileClick}
+            >
               <DropzoneContent
                 label={localize('com_ui_upload_file_search')}
                 hint={localize('com_ui_upload_files_hint')}
