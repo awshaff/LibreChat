@@ -24,6 +24,7 @@ const {
   memoryInstructions,
   createCachedTokenCounter,
   applyContextToAgent,
+  buildProjectContext,
   isMemoryAgentEnabled,
   recordCollectedUsage,
   createDetachedSubagentUsageRecorder,
@@ -2960,6 +2961,14 @@ class AgentClient extends BaseClient {
      */
     const ephemeralAgent = this.options.req.body.ephemeralAgent;
     const mcpManager = getMCPManager();
+    const projectContext = this.options.chatProjectId
+      ? buildProjectContext(
+          await db.getChatProject(
+            this.user ?? this.options.req?.user?.id,
+            this.options.chatProjectId,
+          ),
+        )
+      : undefined;
 
     const prepareRuntimeAgent = async (
       { agent, agentId },
@@ -3007,6 +3016,7 @@ class AgentClient extends BaseClient {
         configServers,
         sharedRunContext: agentRunContextParts.filter(Boolean).join('\n\n'),
         ephemeralAgent: agentId === this.options.agent.id ? ephemeralAgent : undefined,
+        projectContext: agentId === this.options.agent.id ? projectContext : undefined,
       });
       if (assertLateBoundContent) {
         assertModelBoundContent({

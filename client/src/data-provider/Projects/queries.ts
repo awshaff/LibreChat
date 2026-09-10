@@ -1,11 +1,16 @@
-import { dataService, QueryKeys } from 'librechat-data-provider';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { dataService, QueryKeys, DynamicQueryKeys } from 'librechat-data-provider';
 import type {
   UseInfiniteQueryOptions,
   QueryObserverResult,
   UseQueryOptions,
 } from '@tanstack/react-query';
-import type { ProjectListParams, ProjectListResponse, TChatProject } from 'librechat-data-provider';
+import type {
+  TFile,
+  ProjectListParams,
+  ProjectListResponse,
+  TChatProject,
+} from 'librechat-data-provider';
 
 export const useProjectsInfiniteQuery = (
   params: ProjectListParams = {},
@@ -38,6 +43,23 @@ export const useProjectQuery = (
   return useQuery<TChatProject>(
     [QueryKeys.project, projectId],
     () => dataService.getProjectById(projectId ?? ''),
+    {
+      enabled: Boolean(projectId),
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      refetchOnMount: false,
+      ...config,
+    },
+  );
+};
+
+export const useProjectFilesQuery = (
+  projectId?: string | null,
+  config?: UseQueryOptions<TFile[]>,
+): QueryObserverResult<TFile[], unknown> => {
+  return useQuery<TFile[]>(
+    DynamicQueryKeys.projectFiles(projectId ?? ''),
+    () => (projectId ? dataService.getProjectFiles(projectId) : Promise.resolve([])),
     {
       enabled: Boolean(projectId),
       refetchOnWindowFocus: false,

@@ -490,3 +490,68 @@ describe('ChatProject methods', () => {
     expect(deleteResult.deletedCount).toBe(0);
   });
 });
+
+describe('project knowledge resource files', () => {
+  const user = 'user-1';
+  const otherUser = 'user-2';
+
+  it('adds files to a project and dedupes repeated adds', async () => {
+    const project = await methods.createChatProject(user, { name: 'Knowledge Base' });
+    const projectId = project._id!.toString();
+
+    await methods.addProjectResourceFile({ user, projectId, file_id: 'file-1' });
+    const updated = await methods.addProjectResourceFile({ user, projectId, file_id: 'file-1' });
+    await methods.addProjectResourceFile({ user, projectId, file_id: 'file-2' });
+
+    const final = await methods.getChatProject(user, projectId);
+    expect(updated.tool_resources?.context?.file_ids).toEqual(['file-1']);
+    expect(final?.tool_resources?.context?.file_ids).toEqual(['file-1', 'file-2']);
+  });
+
+  it('removes files from a project', async () => {
+    const project = await methods.createChatProject(user, { name: 'Knowledge Base' });
+    const projectId = project._id!.toString();
+
+    await methods.addProjectResourceFile({ user, projectId, file_id: 'file-1' });
+    await methods.addProjectResourceFile({ user, projectId, file_id: 'file-2' });
+
+    const updated = await methods.removeProjectResourceFiles({
+      user,
+      projectId,
+      file_ids: ['file-1'],
+    });
+
+    expect(updated.tool_resources?.context?.file_ids).toEqual(['file-2']);
+  });
+
+  it('rejects adding or removing resource files for a project owned by another user', async () => {
+    const project = await methods.createChatProject(user, { name: 'Private' });
+    const projectId = project._id!.toString();
+
+    await expect(
+      methods.addProjectResourceFile({ user: otherUser, projectId, file_id: 'file-1' }),
+    ).rejects.toThrow();
+    await expect(
+      methods.removeProjectResourceFiles({ user: otherUser, projectId, file_ids: ['file-1'] }),
+    ).rejects.toThrow();
+  });
+
+  it('removes orphaned file_ids across every project on file deletion', async () => {
+    const projectA = await methods.createChatProject(user, { name: 'A' });
+    const projectB = await methods.createChatProject(user, { name: 'B' });
+    const projectAId = projectA._id!.toString();
+    const projectBId = projectB._id!.toString();
+
+    await methods.addProjectResourceFile({ user, projectId: projectAId, file_id: 'shared-file' });
+    await methods.addProjectResourceFile({ user, projectId: projectBId, file_id: 'shared-file' });
+    await methods.addProjectResourceFile({ user, projectId: projectBId, file_id: 'kept-file' });
+
+    const result = await methods.removeProjectResourceFilesFromAllProjects(['shared-file']);
+
+    const finalA = await methods.getChatProject(user, projectAId);
+    const finalB = await methods.getChatProject(user, projectBId);
+    expect(result.modifiedCount).toBe(2);
+    expect(finalA?.tool_resources?.context?.file_ids).toEqual([]);
+    expect(finalB?.tool_resources?.context?.file_ids).toEqual(['kept-file']);
+  });
+});

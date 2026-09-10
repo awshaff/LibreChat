@@ -537,6 +537,10 @@ export const getAgentFiles = (agentId: string): Promise<f.TFile[]> => {
   return request.get(endpoints.agentFiles(agentId));
 };
 
+export const getProjectFiles = (projectId: string): Promise<f.TFile[]> => {
+  return request.get(endpoints.projectFiles(projectId));
+};
+
 export const getFileConfig = (): Promise<TFileConfig> => {
   return request.get(`${endpoints.files()}/config`);
 };

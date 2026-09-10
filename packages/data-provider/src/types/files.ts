@@ -26,6 +26,7 @@ export enum FileContext {
   avatar = 'avatar',
   unknown = 'unknown',
   agents = 'agents',
+  projects = 'projects',
   assistants = 'assistants',
   execute_code = 'execute_code',
   image_generation = 'image_generation',
@@ -295,6 +296,7 @@ export type DeleteFilesBody = {
   files: BatchFile[];
   agent_id?: string;
   assistant_id?: string;
+  project_id?: string;
   tool_resource?: EToolResources;
 };
 

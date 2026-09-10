@@ -9,6 +9,8 @@ import {
   getMCPInstructionsForServers,
   buildAgentInstructions,
   buildAgentAdditionalInstructions,
+  buildProjectContext,
+  mergeProjectContextFiles,
   applyContextToAgent,
 } from './context';
 
@@ -299,6 +301,67 @@ describe('Agent Context Utilities', () => {
     });
   });
 
+  describe('buildProjectContext', () => {
+    it('returns undefined for a null/missing project', () => {
+      expect(buildProjectContext(null)).toBeUndefined();
+      expect(buildProjectContext(undefined)).toBeUndefined();
+    });
+
+    it('returns undefined when the project has no description and no context files', () => {
+      expect(buildProjectContext({ name: 'Alpha' })).toEqual({
+        instructions: 'Project: Alpha',
+        contextFileIds: undefined,
+      });
+    });
+
+    it('combines name and description into instructions and surfaces context file_ids', () => {
+      const result = buildProjectContext({
+        name: 'Research',
+        description: 'Notes on the migration.',
+        tool_resources: { context: { file_ids: ['file-1', 'file-2'] } },
+      });
+
+      expect(result).toEqual({
+        instructions: 'Project: Research\nNotes on the migration.',
+        contextFileIds: ['file-1', 'file-2'],
+      });
+    });
+
+    it('returns undefined when name is empty and there are no context files', () => {
+      expect(buildProjectContext({ name: '', description: '' })).toBeUndefined();
+    });
+  });
+
+  describe('mergeProjectContextFiles', () => {
+    it('does nothing when no context file_ids are given', () => {
+      const agent: AgentWithTools = { id: 'test-agent' };
+      mergeProjectContextFiles(agent, undefined);
+      expect(agent.tool_resources).toBeUndefined();
+
+      mergeProjectContextFiles(agent, []);
+      expect(agent.tool_resources).toBeUndefined();
+    });
+
+    it('merges project file_ids into the agent context tool_resources', () => {
+      const agent: AgentWithTools = { id: 'test-agent' };
+      mergeProjectContextFiles(agent, ['proj-file-1', 'proj-file-2']);
+      expect(agent.tool_resources?.context?.file_ids).toEqual(['proj-file-1', 'proj-file-2']);
+    });
+
+    it('dedupes against the agent own existing context file_ids', () => {
+      const agent: AgentWithTools = {
+        id: 'test-agent',
+        tool_resources: { context: { file_ids: ['agent-file', 'shared-file'] } },
+      };
+      mergeProjectContextFiles(agent, ['shared-file', 'proj-file']);
+      expect(agent.tool_resources?.context?.file_ids).toEqual([
+        'agent-file',
+        'shared-file',
+        'proj-file',
+      ]);
+    });
+  });
+
   describe('applyContextToAgent', () => {
     let mockMCPManager: jest.Mocked<MCPManager>;
     let mockLogger: Logger;
@@ -568,6 +631,56 @@ describe('Agent Context Utilities', () => {
 
       expect(agent.instructions).toBe('Base');
       expect(agent.additional_instructions).toBe('Existing dynamic\n\nContext');
+    });
+
+    it('should merge project instructions and context files into the agent', async () => {
+      const agent: AgentWithTools = {
+        id: 'test-agent',
+        instructions: 'Base instructions',
+        tool_resources: { context: { file_ids: ['agent-file'] } },
+        tools: [],
+      };
+
+      mockMCPManager.formatInstructionsForContext.mockResolvedValue('');
+
+      await applyContextToAgent({
+        agent,
+        sharedRunContext: '',
+        mcpManager: mockMCPManager,
+        projectContext: {
+          instructions: 'Project: Research\nBackground notes.',
+          contextFileIds: ['project-file'],
+        },
+      });
+
+      expect(agent.instructions).toBe('Base instructions\n\nProject: Research\nBackground notes.');
+      expect(agent.tool_resources?.context?.file_ids).toEqual(['agent-file', 'project-file']);
+    });
+
+    it('should still apply project instructions when the MCP fetch fails', async () => {
+      const agent: AgentWithTools = {
+        id: 'test-agent',
+        instructions: 'Base instructions',
+        tools: [
+          new DynamicStructuredTool({
+            name: `tool${Constants.mcp_delimiter}server1`,
+            description: 'Test tool',
+            schema: testSchema,
+            func: async () => 'result',
+          }),
+        ],
+      };
+
+      mockMCPManager.formatInstructionsForContext.mockRejectedValue(new Error('MCP fetch failed'));
+
+      await applyContextToAgent({
+        agent,
+        sharedRunContext: '',
+        mcpManager: mockMCPManager,
+        projectContext: { instructions: 'Project: Research' },
+      });
+
+      expect(agent.instructions).toBe('Base instructions\n\nProject: Research');
     });
   });
 });

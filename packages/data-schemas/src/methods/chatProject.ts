@@ -1,4 +1,5 @@
 import {
+  EToolResources,
   MAX_CHAT_PROJECT_NAME_LENGTH,
   MAX_CHAT_PROJECT_DESCRIPTION_LENGTH,
 } from 'librechat-data-provider';
@@ -62,6 +63,19 @@ export interface ChatProjectMethods {
     projectId: string | null,
   ): Promise<AssignConversationToProjectResult | null>;
   refreshChatProjectStats(user: string, projectId: string): Promise<IChatProject | null>;
+  addProjectResourceFile(params: {
+    user: string;
+    projectId: string;
+    file_id: string;
+  }): Promise<IChatProject>;
+  removeProjectResourceFiles(params: {
+    user: string;
+    projectId: string;
+    file_ids: string[];
+  }): Promise<IChatProject>;
+  removeProjectResourceFilesFromAllProjects(
+    file_ids: string[],
+  ): Promise<{ matchedCount: number; modifiedCount: number }>;
 }
 
 type ProjectCursor = {
@@ -77,6 +91,8 @@ type ProjectStatsSnapshot = Pick<
 
 const VALID_SORT_FIELDS = new Set<ChatProjectSortBy>(['name', 'createdAt', 'lastConversationAt']);
 const PROJECT_STATS_REFRESH_MAX_ATTEMPTS = 8;
+/** Project knowledge supports only full-text context files, never RAG/file_search. */
+const CONTEXT_TOOL_RESOURCE = EToolResources.context;
 
 function normalizeSortBy(sortBy?: string): ChatProjectSortBy {
   return VALID_SORT_FIELDS.has(sortBy as ChatProjectSortBy)
@@ -525,6 +541,93 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
     return await refreshChatProjectStatsForUser(mongoose, user, projectId);
   }
 
+  async function addProjectResourceFile({
+    user,
+    projectId,
+    file_id,
+  }: {
+    user: string;
+    projectId: string;
+    file_id: string;
+  }): Promise<IChatProject> {
+    if (!isValidObjectIdString(projectId)) {
+      throw new Error('Project not found for adding resource file');
+    }
+
+    const ChatProject = mongoose.models.ChatProject as Model<IChatProjectDocument>;
+    const projectFilter = { _id: new mongoose.Types.ObjectId(projectId), user };
+    const fileIdsPath = `tool_resources.${CONTEXT_TOOL_RESOURCE}.file_ids`;
+
+    await ChatProject.updateOne(
+      { ...projectFilter, [fileIdsPath]: { $exists: false } },
+      { $set: { [fileIdsPath]: [] } },
+    );
+
+    const updatedProject = await ChatProject.findOneAndUpdate(
+      projectFilter,
+      { $addToSet: { [fileIdsPath]: file_id } },
+      { new: true },
+    ).lean<IChatProject>();
+
+    if (!updatedProject) {
+      throw new Error('Project not found for adding resource file');
+    }
+    return updatedProject;
+  }
+
+  async function removeProjectResourceFiles({
+    user,
+    projectId,
+    file_ids,
+  }: {
+    user: string;
+    projectId: string;
+    file_ids: string[];
+  }): Promise<IChatProject> {
+    if (!isValidObjectIdString(projectId)) {
+      throw new Error('Project not found for removing resource files');
+    }
+
+    const ChatProject = mongoose.models.ChatProject as Model<IChatProjectDocument>;
+    const projectFilter = { _id: new mongoose.Types.ObjectId(projectId), user };
+    const fileIdsPath = `tool_resources.${CONTEXT_TOOL_RESOURCE}.file_ids`;
+
+    const updatedProject = await ChatProject.findOneAndUpdate(
+      projectFilter,
+      { $pullAll: { [fileIdsPath]: file_ids } },
+      { new: true },
+    ).lean<IChatProject>();
+
+    if (!updatedProject) {
+      throw new Error('Project not found for removing resource files');
+    }
+    return updatedProject;
+  }
+
+  /**
+   * Removes the given file_ids from every project's knowledge so file deletion cannot
+   * leave orphaned stubs behind, mirroring the same fix applied to agents (see issue #12776).
+   */
+  async function removeProjectResourceFilesFromAllProjects(
+    file_ids: string[],
+  ): Promise<{ matchedCount: number; modifiedCount: number }> {
+    if (!file_ids || file_ids.length === 0) {
+      return { matchedCount: 0, modifiedCount: 0 };
+    }
+
+    const ChatProject = mongoose.models.ChatProject as Model<IChatProjectDocument>;
+    const fileIdsPath = `tool_resources.${CONTEXT_TOOL_RESOURCE}.file_ids`;
+
+    const result = await ChatProject.updateMany(
+      { [fileIdsPath]: { $in: file_ids } },
+      { $pullAll: { [fileIdsPath]: file_ids } },
+    );
+    return {
+      matchedCount: result.matchedCount ?? 0,
+      modifiedCount: result.modifiedCount ?? 0,
+    };
+  }
+
   return {
     createChatProject,
     getChatProject,
@@ -533,5 +636,8 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
     deleteChatProject,
     assignConversationToProject,
     refreshChatProjectStats,
+    addProjectResourceFile,
+    removeProjectResourceFiles,
+    removeProjectResourceFilesFromAllProjects,
   };
 }

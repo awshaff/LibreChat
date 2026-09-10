@@ -15,8 +15,13 @@ import type {
   CodeWorkspaceOperation,
   CodeWorkspaceSelection,
 } from './code/workspace';
+import type {
+  Agent,
+  EToolResources,
+  AgentToolResources,
+  StatefulCodeEnvironment,
+} from './types/assistants';
 import type { CodeEnvironmentUserConfigSchema, CodeEnvironmentUserSettings } from './config';
-import type { Agent, EToolResources, StatefulCodeEnvironment } from './types/assistants';
 import type { CodeApprovalMode } from './code/approval';
 import type { RefillIntervalUnit } from './balance';
 import type { SettingDefinition } from './generate';
@@ -402,6 +407,8 @@ export type TChatProject = {
   lastConversationId?: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Project knowledge: full-text context files available to every chat in this project. */
+  tool_resources?: Pick<AgentToolResources, EToolResources.context>;
 };
 
 export type TCreateChatProjectRequest = {

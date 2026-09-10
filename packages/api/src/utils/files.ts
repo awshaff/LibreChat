@@ -13,6 +13,9 @@ const USER_FACING_UPLOAD_ERRORS = [
   ['total decompressed size exceeds the', 'Document exceeds the total decompressed size limit'],
   ['MB decompressed limit', 'Document exceeds the decompressed size limit'],
   ['MB storage limit', 'Extracted text exceeds the storage size limit'],
+  ['is not supported for text parsing', 'This file type is not supported for text extraction'],
+  ['Project not found for project file upload', 'Project not found'],
+  ['OCR capability is not enabled', 'OCR is not enabled for this deployment'],
 ] as const;
 
 const ASCII_FILENAME_SAFE_PATTERN = /^[a-zA-Z0-9._-]$/;
