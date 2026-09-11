@@ -145,8 +145,7 @@ export function buildProjectContext(
 /**
  * Merges a Project's knowledge `file_ids` into the agent's own `tool_resources.context`,
  * so `primeResources` (which reads that field) picks them up without any changes of its
- * own — full-text context injection has no per-entity scoping concern, unlike file_search.
- * Mutates the agent object in place.
+ * own. Mutates the agent object in place.
  */
 export function mergeProjectContextFiles(agent: AgentWithTools, contextFileIds?: string[]): void {
   if (!contextFileIds || contextFileIds.length === 0) {

@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-import { EToolResources } from 'librechat-data-provider';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import type { IChatProject, IConversation } from '~/types';
 import {
@@ -490,114 +489,69 @@ describe('ChatProject methods', () => {
     expect(assignment).toBeNull();
     expect(deleteResult.deletedCount).toBe(0);
   });
+});
 
-  describe('project knowledge resource files', () => {
-    it('adds a file to a project tool resource, deduplicating repeat adds', async () => {
-      const project = await methods.createChatProject(user, { name: 'Knowledge base' });
-      const projectId = project._id!.toString();
+describe('project knowledge resource files', () => {
+  const user = 'user-1';
+  const otherUser = 'user-2';
 
-      await methods.addProjectResourceFile({
-        user,
-        projectId,
-        tool_resource: EToolResources.file_search,
-        file_id: 'file-1',
-      });
-      const updated = await methods.addProjectResourceFile({
-        user,
-        projectId,
-        tool_resource: EToolResources.file_search,
-        file_id: 'file-1',
-      });
+  it('adds files to a project and dedupes repeated adds', async () => {
+    const project = await methods.createChatProject(user, { name: 'Knowledge Base' });
+    const projectId = project._id!.toString();
 
-      expect(updated.tool_resources?.file_search?.file_ids).toEqual(['file-1']);
+    await methods.addProjectResourceFile({ user, projectId, file_id: 'file-1' });
+    const updated = await methods.addProjectResourceFile({ user, projectId, file_id: 'file-1' });
+    await methods.addProjectResourceFile({ user, projectId, file_id: 'file-2' });
+
+    const final = await methods.getChatProject(user, projectId);
+    expect(updated.tool_resources?.context?.file_ids).toEqual(['file-1']);
+    expect(final?.tool_resources?.context?.file_ids).toEqual(['file-1', 'file-2']);
+  });
+
+  it('removes files from a project', async () => {
+    const project = await methods.createChatProject(user, { name: 'Knowledge Base' });
+    const projectId = project._id!.toString();
+
+    await methods.addProjectResourceFile({ user, projectId, file_id: 'file-1' });
+    await methods.addProjectResourceFile({ user, projectId, file_id: 'file-2' });
+
+    const updated = await methods.removeProjectResourceFiles({
+      user,
+      projectId,
+      file_ids: ['file-1'],
     });
 
-    it('tracks file_search and context resources independently', async () => {
-      const project = await methods.createChatProject(user, { name: 'Knowledge base' });
-      const projectId = project._id!.toString();
+    expect(updated.tool_resources?.context?.file_ids).toEqual(['file-2']);
+  });
 
-      await methods.addProjectResourceFile({
-        user,
-        projectId,
-        tool_resource: EToolResources.file_search,
-        file_id: 'search-file',
-      });
-      const updated = await methods.addProjectResourceFile({
-        user,
-        projectId,
-        tool_resource: EToolResources.context,
-        file_id: 'context-file',
-      });
+  it('rejects adding or removing resource files for a project owned by another user', async () => {
+    const project = await methods.createChatProject(user, { name: 'Private' });
+    const projectId = project._id!.toString();
 
-      expect(updated.tool_resources?.file_search?.file_ids).toEqual(['search-file']);
-      expect(updated.tool_resources?.context?.file_ids).toEqual(['context-file']);
-    });
+    await expect(
+      methods.addProjectResourceFile({ user: otherUser, projectId, file_id: 'file-1' }),
+    ).rejects.toThrow();
+    await expect(
+      methods.removeProjectResourceFiles({ user: otherUser, projectId, file_ids: ['file-1'] }),
+    ).rejects.toThrow();
+  });
 
-    it('removes resource files from a project', async () => {
-      const project = await methods.createChatProject(user, { name: 'Knowledge base' });
-      const projectId = project._id!.toString();
+  it('removes orphaned file_ids across every project on file deletion', async () => {
+    const projectA = await methods.createChatProject(user, { name: 'A' });
+    const projectB = await methods.createChatProject(user, { name: 'B' });
+    const projectAId = projectA._id!.toString();
+    const projectBId = projectB._id!.toString();
 
-      await methods.addProjectResourceFile({
-        user,
-        projectId,
-        tool_resource: EToolResources.file_search,
-        file_id: 'file-1',
-      });
-      await methods.addProjectResourceFile({
-        user,
-        projectId,
-        tool_resource: EToolResources.file_search,
-        file_id: 'file-2',
-      });
+    await methods.addProjectResourceFile({ user, projectId: projectAId, file_id: 'shared-file' });
+    await methods.addProjectResourceFile({ user, projectId: projectBId, file_id: 'shared-file' });
+    await methods.addProjectResourceFile({ user, projectId: projectBId, file_id: 'kept-file' });
 
-      const updated = await methods.removeProjectResourceFiles({
-        user,
-        projectId,
-        files: [{ tool_resource: EToolResources.file_search, file_id: 'file-1' }],
-      });
+    const result = await methods.removeProjectResourceFilesFromAllProjects(['shared-file']);
 
-      expect(updated.tool_resources?.file_search?.file_ids).toEqual(['file-2']);
-    });
-
-    it('does not leak resource files across users', async () => {
-      const project = await methods.createChatProject(user, { name: 'Mine' });
-      const projectId = project._id!.toString();
-
-      await expect(
-        methods.addProjectResourceFile({
-          user: otherUser,
-          projectId,
-          tool_resource: EToolResources.file_search,
-          file_id: 'file-1',
-        }),
-      ).rejects.toThrow();
-    });
-
-    it('cleans up orphaned file references across every project', async () => {
-      const projectA = await methods.createChatProject(user, { name: 'A' });
-      const projectB = await methods.createChatProject(otherUser, { name: 'B' });
-
-      await methods.addProjectResourceFile({
-        user,
-        projectId: projectA._id!.toString(),
-        tool_resource: EToolResources.file_search,
-        file_id: 'shared-file',
-      });
-      await methods.addProjectResourceFile({
-        user: otherUser,
-        projectId: projectB._id!.toString(),
-        tool_resource: EToolResources.context,
-        file_id: 'shared-file',
-      });
-
-      const result = await methods.removeProjectResourceFilesFromAllProjects(['shared-file']);
-
-      const refreshedA = await methods.getChatProject(user, projectA._id!.toString());
-      const refreshedB = await methods.getChatProject(otherUser, projectB._id!.toString());
-
-      expect(result.matchedCount).toBe(2);
-      expect(refreshedA?.tool_resources?.file_search?.file_ids).toEqual([]);
-      expect(refreshedB?.tool_resources?.context?.file_ids).toEqual([]);
-    });
+    const finalA = await methods.getChatProject(user, projectAId);
+    const finalB = await methods.getChatProject(user, projectBId);
+    expect(result.modifiedCount).toBe(2);
+    expect(finalA?.tool_resources?.context?.file_ids).toEqual([]);
+    expect(finalB?.tool_resources?.context?.file_ids).toEqual(['kept-file']);
   });
 });

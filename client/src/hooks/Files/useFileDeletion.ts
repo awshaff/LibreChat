@@ -19,15 +19,15 @@ type FileMapSetter = GenericSetter<Map<string, ExtendedFile>>;
 const useFileDeletion = ({
   mutateAsync,
   agent_id,
-  project_id,
   assistant_id,
+  project_id,
   tool_resource,
   index,
 }: {
   mutateAsync: UseMutateAsyncFunction<t.DeleteFilesResponse, unknown, t.DeleteFilesBody, unknown>;
   agent_id?: string;
-  project_id?: string;
   assistant_id?: string;
+  project_id?: string;
   tool_resource?: EToolResources;
   index?: number;
 }) => {
@@ -38,20 +38,20 @@ const useFileDeletion = ({
     ({
       filesToDelete,
       agent_id,
-      project_id,
       assistant_id,
+      project_id,
       tool_resource,
     }: {
       filesToDelete: t.BatchFile[];
       agent_id?: string;
-      project_id?: string;
       assistant_id?: string;
+      project_id?: string;
       tool_resource?: EToolResources;
     }) => {
       const payload = removeNullishValues({
         agent_id,
-        project_id,
         assistant_id,
+        project_id,
         tool_resource,
       });
       /** The chips are already gone by the time this runs, so a lost request leaves nothing that
@@ -59,14 +59,15 @@ const useFileDeletion = ({
        * A resolved request proves nothing on its own, since a failed storage delete is reported
        * as a 200 naming the file in `failedFileIds`. */
       const retainBatch = (files: t.BatchFile[]): void => {
-        /** Only a plain deletion belongs in the shared retry queue. An agent, project, or assistant
-         * unlink carries context the retry does not replay, and without it the route would take the
-         * ordinary delete branch and destroy a record other references still point at. Nothing is
-         * orphaned by a failed unlink either: the file and its links are all still there. */
+        /** Only a plain deletion belongs in the shared retry queue. An agent, assistant, or
+         * project unlink carries context the retry does not replay, and without it the route
+         * would take the ordinary delete branch and destroy a record other references still
+         * point at. Nothing is orphaned by a failed unlink either: the file and its links are
+         * all still there. */
         if (
           agent_id != null ||
-          project_id != null ||
           assistant_id != null ||
+          project_id != null ||
           tool_resource != null
         ) {
           return;
@@ -157,14 +158,14 @@ const useFileDeletion = ({
         debouncedDelete({
           filesToDelete: newBatch,
           agent_id,
-          project_id,
           assistant_id,
+          project_id,
           tool_resource,
         });
         return newBatch;
       });
     },
-    [debouncedDelete, setFilesToDelete, agent_id, project_id, assistant_id, tool_resource, index],
+    [debouncedDelete, setFilesToDelete, agent_id, assistant_id, project_id, tool_resource, index],
   );
 
   const deleteFiles = useCallback(

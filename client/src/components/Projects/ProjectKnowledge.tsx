@@ -34,6 +34,8 @@ export default function ProjectKnowledge({ projectId }: { projectId: string }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<Map<string, ExtendedFile>>(new Map());
   const fileHandlingState = useMemo(() => ({ files, setFiles, conversation: null }), [files]);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const dragCounterRef = useRef(0);
 
   const { data: projectFiles } = useProjectFilesQuery(projectId);
   const { data: fileConfig = null } = useGetFileConfig({
@@ -57,7 +59,7 @@ export default function ProjectKnowledge({ projectId }: { projectId: string }) {
 
   const { handleFileChange, handleFiles } = useFileHandlingNoChatContext(
     {
-      additionalMetadata: { project_id: projectId, tool_resource: EToolResources.file_search },
+      additionalMetadata: { project_id: projectId, tool_resource: EToolResources.context },
       endpointOverride: EModelEndpoint.agents,
       endpointTypeOverride: EModelEndpoint.agents,
       fileSetter: setFiles,
@@ -66,8 +68,6 @@ export default function ProjectKnowledge({ projectId }: { projectId: string }) {
   );
 
   const isUploadDisabled = endpointFileConfig?.disabled ?? false;
-  const [isDragActive, setIsDragActive] = useState(false);
-  const dragCounterRef = useRef(0);
 
   const handleLocalFileClick = () => {
     if (fileInputRef.current) {
@@ -127,7 +127,7 @@ export default function ProjectKnowledge({ projectId }: { projectId: string }) {
           files={files}
           setFiles={setFiles}
           project_id={projectId}
-          tool_resource={EToolResources.file_search}
+          tool_resource={EToolResources.context}
           Wrapper={FileRowWrapper}
         />
         {isUploadDisabled ? null : (
@@ -146,7 +146,7 @@ export default function ProjectKnowledge({ projectId }: { projectId: string }) {
               onClick={handleLocalFileClick}
             >
               <DropzoneContent
-                label={localize('com_ui_upload_file_search')}
+                label={localize('com_ui_upload_file_context')}
                 hint={localize('com_ui_upload_files_hint')}
               />
             </button>

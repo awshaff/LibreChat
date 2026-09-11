@@ -1,7 +1,7 @@
 import {
+  EToolResources,
   MAX_CHAT_PROJECT_NAME_LENGTH,
   MAX_CHAT_PROJECT_DESCRIPTION_LENGTH,
-  EToolResources,
 } from 'librechat-data-provider';
 import type { FilterQuery, Model, SortOrder, Types } from 'mongoose';
 import type { IChatProject, IChatProjectDocument, IConversation } from '~/types';
@@ -44,14 +44,6 @@ export type AssignConversationToProjectResult = {
   projectId: string | null;
 };
 
-/** The subset of `EToolResources` that carries knowledge file_ids on a `ChatProject`. */
-export type ProjectToolResource = EToolResources.file_search | EToolResources.context;
-
-export type ProjectResourceFile = {
-  tool_resource: ProjectToolResource;
-  file_id: string;
-};
-
 export interface ChatProjectMethods {
   createChatProject(user: string, input: CreateChatProjectInput): Promise<IChatProject>;
   getChatProject(user: string, projectId: string): Promise<IChatProject | null>;
@@ -74,13 +66,12 @@ export interface ChatProjectMethods {
   addProjectResourceFile(params: {
     user: string;
     projectId: string;
-    tool_resource: ProjectToolResource;
     file_id: string;
   }): Promise<IChatProject>;
   removeProjectResourceFiles(params: {
     user: string;
     projectId: string;
-    files: ProjectResourceFile[];
+    file_ids: string[];
   }): Promise<IChatProject>;
   removeProjectResourceFilesFromAllProjects(
     file_ids: string[],
@@ -100,10 +91,8 @@ type ProjectStatsSnapshot = Pick<
 
 const VALID_SORT_FIELDS = new Set<ChatProjectSortBy>(['name', 'createdAt', 'lastConversationAt']);
 const PROJECT_STATS_REFRESH_MAX_ATTEMPTS = 8;
-const PROJECT_TOOL_RESOURCE_KEYS: ReadonlyArray<ProjectToolResource> = [
-  EToolResources.file_search,
-  EToolResources.context,
-];
+/** Project knowledge supports only full-text context files, never RAG/file_search. */
+const CONTEXT_TOOL_RESOURCE = EToolResources.context;
 
 function normalizeSortBy(sortBy?: string): ChatProjectSortBy {
   return VALID_SORT_FIELDS.has(sortBy as ChatProjectSortBy)
@@ -555,12 +544,10 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
   async function addProjectResourceFile({
     user,
     projectId,
-    tool_resource,
     file_id,
   }: {
     user: string;
     projectId: string;
-    tool_resource: ProjectToolResource;
     file_id: string;
   }): Promise<IChatProject> {
     if (!isValidObjectIdString(projectId)) {
@@ -569,7 +556,7 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
 
     const ChatProject = mongoose.models.ChatProject as Model<IChatProjectDocument>;
     const projectFilter = { _id: new mongoose.Types.ObjectId(projectId), user };
-    const fileIdsPath = `tool_resources.${tool_resource}.file_ids`;
+    const fileIdsPath = `tool_resources.${CONTEXT_TOOL_RESOURCE}.file_ids`;
 
     await ChatProject.updateOne(
       { ...projectFilter, [fileIdsPath]: { $exists: false } },
@@ -591,11 +578,11 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
   async function removeProjectResourceFiles({
     user,
     projectId,
-    files,
+    file_ids,
   }: {
     user: string;
     projectId: string;
-    files: ProjectResourceFile[];
+    file_ids: string[];
   }): Promise<IChatProject> {
     if (!isValidObjectIdString(projectId)) {
       throw new Error('Project not found for removing resource files');
@@ -603,26 +590,11 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
 
     const ChatProject = mongoose.models.ChatProject as Model<IChatProjectDocument>;
     const projectFilter = { _id: new mongoose.Types.ObjectId(projectId), user };
-
-    const filesByResource = files.reduce<Record<string, string[]>>(
-      (acc, { tool_resource, file_id }) => {
-        if (!acc[tool_resource]) {
-          acc[tool_resource] = [];
-        }
-        acc[tool_resource].push(file_id);
-        return acc;
-      },
-      {},
-    );
-
-    const pullAllOps: Record<string, string[]> = {};
-    for (const [resource, fileIds] of Object.entries(filesByResource)) {
-      pullAllOps[`tool_resources.${resource}.file_ids`] = fileIds;
-    }
+    const fileIdsPath = `tool_resources.${CONTEXT_TOOL_RESOURCE}.file_ids`;
 
     const updatedProject = await ChatProject.findOneAndUpdate(
       projectFilter,
-      { $pullAll: pullAllOps },
+      { $pullAll: { [fileIdsPath]: file_ids } },
       { new: true },
     ).lean<IChatProject>();
 
@@ -633,9 +605,8 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
   }
 
   /**
-   * Removes the given file_ids from every project's `tool_resources.*.file_ids`
-   * so file deletion cannot leave orphaned stubs behind, mirroring the same fix
-   * applied to agents (see issue #12776).
+   * Removes the given file_ids from every project's knowledge so file deletion cannot
+   * leave orphaned stubs behind, mirroring the same fix applied to agents (see issue #12776).
    */
   async function removeProjectResourceFilesFromAllProjects(
     file_ids: string[],
@@ -645,16 +616,12 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
     }
 
     const ChatProject = mongoose.models.ChatProject as Model<IChatProjectDocument>;
+    const fileIdsPath = `tool_resources.${CONTEXT_TOOL_RESOURCE}.file_ids`;
 
-    const orQuery = PROJECT_TOOL_RESOURCE_KEYS.map((key) => ({
-      [`tool_resources.${key}.file_ids`]: { $in: file_ids },
-    }));
-    const pullAllOps = PROJECT_TOOL_RESOURCE_KEYS.reduce<Record<string, string[]>>((acc, key) => {
-      acc[`tool_resources.${key}.file_ids`] = file_ids;
-      return acc;
-    }, {});
-
-    const result = await ChatProject.updateMany({ $or: orQuery }, { $pullAll: pullAllOps });
+    const result = await ChatProject.updateMany(
+      { [fileIdsPath]: { $in: file_ids } },
+      { $pullAll: { [fileIdsPath]: file_ids } },
+    );
     return {
       matchedCount: result.matchedCount ?? 0,
       modifiedCount: result.modifiedCount ?? 0,

@@ -1358,11 +1358,11 @@ const processAgentFileUpload = async ({ req, res, metadata, sseStream }) => {
 };
 
 /**
- * Handles knowledge-file uploads for a Project's `tool_resources`. Reuses the same
- * storage/extraction/RAG primitives as `processAgentFileUpload`, scoped to the two
- * tool resources Projects support: `file_search` (RAG dual-storage) and `context`
- * (full extracted text, no vector search). Projects have no execute_code/image_edit/
- * ocr tool, so those branches are intentionally omitted.
+ * Handles knowledge-file uploads for a Project's `tool_resources`. Projects support only
+ * the `context` tool resource (full extracted text, no vector search) — the same
+ * full-text path `processAgentFileUpload` uses for an agent's own context files, just
+ * scoped to `project_id` instead of `agent_id`. There is no RAG/file_search option here:
+ * knowledge attached to a Project is always injected as plain text.
  *
  * @param {Object} params - The parameters object.
  * @param {ServerRequest} params.req - The Express request object.
@@ -1379,11 +1379,8 @@ const processProjectFileUpload = async ({ req, res, metadata, sseStream }) => {
   if (!project_id) {
     throw new Error('No project ID provided for project file upload');
   }
-  if (tool_resource !== EToolResources.file_search && tool_resource !== EToolResources.context) {
+  if (tool_resource !== EToolResources.context) {
     throw new Error('Unsupported tool resource for project file upload');
-  }
-  if (tool_resource === EToolResources.file_search && file.mimetype.startsWith('image')) {
-    throw new Error('Image uploads are not supported for file search tool resources');
   }
 
   const project = await db.getChatProject(req.user.id, project_id);
@@ -1394,284 +1391,206 @@ const processProjectFileUpload = async ({ req, res, metadata, sseStream }) => {
   const entity_id = project_id;
   const basePath = mime.getType(file.originalname)?.startsWith('image') ? 'images' : 'uploads';
 
-  if (tool_resource === EToolResources.context) {
-    const getExtractionLogDetails = (error) =>
-      getFileExtractionLogDetails({
+  const getExtractionLogDetails = (error) =>
+    getFileExtractionLogDetails({
+      filters: appConfig?.filters,
+      filename: file.originalname,
+      fileId: file_id,
+      error,
+    });
+  const { fileLabel: extractionFileLabel } = getExtractionLogDetails(undefined);
+
+  const createTextFile = async ({ text, isTranscript = false }) => {
+    if (!isTranscript) {
+      assertExtractedTextInspectable({
         filters: appConfig?.filters,
-        filename: file.originalname,
-        fileId: file_id,
-        error,
+        text,
       });
-    const { fileLabel: extractionFileLabel } = getExtractionLogDetails(undefined);
-
-    const createTextFile = async ({ text, isTranscript = false }) => {
-      if (!isTranscript) {
-        assertExtractedTextInspectable({
-          filters: appConfig?.filters,
-          text,
-        });
-      }
-      const textBytes = Buffer.byteLength(text, 'utf8');
-      if (textBytes > 15 * megabyte) {
-        throw new Error(
-          `Extracted text from "${file.originalname}" exceeds the 15MB storage limit (${Math.round(textBytes / megabyte)}MB). Try a shorter document.`,
-        );
-      }
-      if (
-        hasActiveFileFieldPolicy(appConfig?.filters, [
-          isTranscript ? 'transcript' : 'extracted_text',
-        ])
-      ) {
-        const content = isTranscript ? { transcript: text } : { extractedText: text };
-        const finding = inspectContent(extractFileContent(content), {
-          filters: appConfig.filters,
-        });
-        if (finding != null) {
-          const blockResponse = contentFilterBlockResponse(finding);
-          if (sseStream) {
-            sseStream.sendError({
-              ...blockResponse,
-              code: 400,
-              temp_file_id,
-              tool_resource,
-              display_to_user: true,
-            });
-          } else {
-            res.status(400).json(blockResponse);
-          }
-          return;
+    }
+    const textBytes = Buffer.byteLength(text, 'utf8');
+    if (textBytes > 15 * megabyte) {
+      throw new Error(
+        `Extracted text from "${file.originalname}" exceeds the 15MB storage limit (${Math.round(textBytes / megabyte)}MB). Try a shorter document.`,
+      );
+    }
+    if (
+      hasActiveFileFieldPolicy(appConfig?.filters, [isTranscript ? 'transcript' : 'extracted_text'])
+    ) {
+      const content = isTranscript ? { transcript: text } : { extractedText: text };
+      const finding = inspectContent(extractFileContent(content), {
+        filters: appConfig.filters,
+      });
+      if (finding != null) {
+        const blockResponse = contentFilterBlockResponse(finding);
+        if (sseStream) {
+          sseStream.sendError({
+            ...blockResponse,
+            code: 400,
+            temp_file_id,
+            tool_resource,
+            display_to_user: true,
+          });
+        } else {
+          res.status(400).json(blockResponse);
         }
+        return;
       }
+    }
 
-      const isImageFile = file.mimetype.startsWith('image');
-      const source = getFileStrategy(appConfig, { isImage: isImageFile });
-      const { handleFileUpload } = getStrategyFunctions(source);
-      const sanitizedUploadFn = createSanitizedUploadWrapper(handleFileUpload);
-      const storageResult = await sanitizedUploadFn({ req, file, file_id, basePath, entity_id });
-      const { bytes, filename, filepath, embedded, height, width } = storageResult;
+    const isImageFile = file.mimetype.startsWith('image');
+    const source = getFileStrategy(appConfig, { isImage: isImageFile });
+    const { handleFileUpload } = getStrategyFunctions(source);
+    const sanitizedUploadFn = createSanitizedUploadWrapper(handleFileUpload);
+    const storageResult = await sanitizedUploadFn({ req, file, file_id, basePath, entity_id });
+    const { bytes, filename, filepath, embedded, height, width } = storageResult;
 
-      const retentionExpiry = await getAgentFileRetentionExpiry({
-        req,
-        messageAttachment: false,
-        tool_resource,
-      });
-      const fileInfo = {
-        ...removeNullishValues({
-          text,
-          bytes,
-          file_id,
-          temp_file_id,
-          user: req.user.id,
-          type: file.mimetype,
-          filepath,
-          source,
-          filename: filename ?? sanitizeFilename(file.originalname),
-          context: FileContext.projects,
-          tenantId: req.user.tenantId,
-          embedded,
-          height,
-          width,
-        }),
-        ...retentionExpiry,
-      };
-
-      await db.addProjectResourceFile({
-        user: req.user.id,
-        projectId: project_id,
-        tool_resource,
+    const retentionExpiry = await getAgentFileRetentionExpiry({
+      req,
+      messageAttachment: false,
+      tool_resource,
+    });
+    const fileInfo = {
+      ...removeNullishValues({
+        text,
+        bytes,
         file_id,
-      });
-      const result = await db.createFile(fileInfo, true);
-      sendUploadSuccess(res, sseStream, 'Project file uploaded and processed successfully', result);
+        temp_file_id,
+        user: req.user.id,
+        type: file.mimetype,
+        filepath,
+        source,
+        filename: filename ?? sanitizeFilename(file.originalname),
+        context: FileContext.projects,
+        tenantId: req.user.tenantId,
+        embedded,
+        height,
+        width,
+      }),
+      ...retentionExpiry,
     };
 
-    const fileConfig = mergeFileConfig(appConfig.fileConfig);
-    const extractedTextPlan = getUploadExtractedTextPlan({
-      endpoint: metadata.endpoint,
-      toolResource: tool_resource,
-      mimeType: file.mimetype,
-      fileConfig,
-      ocrConfigured: appConfig?.ocr != null,
-      ragConfigured: !!process.env.RAG_API_URL,
+    await db.addProjectResourceFile({
+      user: req.user.id,
+      projectId: project_id,
+      file_id,
     });
-    const shouldUseConfiguredOCR = extractedTextPlan === UPLOAD_EXTRACTED_TEXT_PLANS.configuredOCR;
-    const shouldUseConfiguredText = extractedTextPlan === UPLOAD_EXTRACTED_TEXT_PLANS.configuredRAG;
-    const shouldUseDocumentParser =
-      extractedTextPlan === UPLOAD_EXTRACTED_TEXT_PLANS.documentParser;
-    const shouldUseOCR = shouldUseConfiguredOCR || shouldUseDocumentParser;
+    const result = await db.createFile(fileInfo, true);
+    sendUploadSuccess(res, sseStream, 'Project file uploaded and processed successfully', result);
+  };
 
-    const resolveDocumentText = async () => {
-      if (shouldUseConfiguredOCR) {
-        try {
-          const ocrStrategy = appConfig?.ocr?.strategy ?? FileSources.document_parser;
-          const { handleFileUpload } = getStrategyFunctions(ocrStrategy);
-          return await handleFileUpload({ req, file, loadAuthValues });
-        } catch (err) {
-          const { errorMetadata } = getExtractionLogDetails(err);
-          logger.error(
-            `[processProjectFileUpload] Configured OCR failed for ${extractionFileLabel}, falling back to document_parser:`,
-            errorMetadata,
-          );
-        }
-      }
+  const fileConfig = mergeFileConfig(appConfig.fileConfig);
+  const extractedTextPlan = getUploadExtractedTextPlan({
+    endpoint: metadata.endpoint,
+    toolResource: tool_resource,
+    mimeType: file.mimetype,
+    fileConfig,
+    ocrConfigured: appConfig?.ocr != null,
+    ragConfigured: !!process.env.RAG_API_URL,
+  });
+  const shouldUseConfiguredOCR = extractedTextPlan === UPLOAD_EXTRACTED_TEXT_PLANS.configuredOCR;
+  const shouldUseConfiguredText = extractedTextPlan === UPLOAD_EXTRACTED_TEXT_PLANS.configuredRAG;
+  const shouldUseDocumentParser = extractedTextPlan === UPLOAD_EXTRACTED_TEXT_PLANS.documentParser;
+  const shouldUseOCR = shouldUseConfiguredOCR || shouldUseDocumentParser;
+
+  const resolveDocumentText = async () => {
+    if (shouldUseConfiguredOCR) {
       try {
-        const { handleFileUpload } = getStrategyFunctions(FileSources.document_parser);
+        const ocrStrategy = appConfig?.ocr?.strategy ?? FileSources.document_parser;
+        const { handleFileUpload } = getStrategyFunctions(ocrStrategy);
         return await handleFileUpload({ req, file, loadAuthValues });
       } catch (err) {
         const { errorMetadata } = getExtractionLogDetails(err);
         logger.error(
-          `[processProjectFileUpload] Document parser failed for ${extractionFileLabel}:`,
+          `[processProjectFileUpload] Configured OCR failed for ${extractionFileLabel}, falling back to document_parser:`,
           errorMetadata,
         );
-        throw err;
       }
-    };
-
-    if (shouldUseConfiguredOCR && !(await checkCapability(req, AgentCapabilities.ocr))) {
-      throw new Error('OCR capability is not enabled');
     }
+    try {
+      const { handleFileUpload } = getStrategyFunctions(FileSources.document_parser);
+      return await handleFileUpload({ req, file, loadAuthValues });
+    } catch (err) {
+      const { errorMetadata } = getExtractionLogDetails(err);
+      logger.error(
+        `[processProjectFileUpload] Document parser failed for ${extractionFileLabel}:`,
+        errorMetadata,
+      );
+      throw err;
+    }
+  };
 
-    if (shouldUseOCR) {
-      const ocrResult = await extractInspectableFileText({
+  if (shouldUseConfiguredOCR && !(await checkCapability(req, AgentCapabilities.ocr))) {
+    throw new Error('OCR capability is not enabled');
+  }
+
+  if (shouldUseOCR) {
+    const ocrResult = await extractInspectableFileText({
+      filters: appConfig?.filters,
+      extract: resolveDocumentText,
+    });
+    if (ocrResult) {
+      const { text } = ocrResult;
+      return await createTextFile({ text });
+    }
+    throw new Error(
+      `Unable to extract text from "${file.originalname}". The document may be image-based and requires an OCR service to process.`,
+    );
+  }
+
+  const shouldUseSTT = fileConfig.checkType(
+    file.mimetype,
+    fileConfig.stt?.supportedMimeTypes || [],
+  );
+  if (shouldUseSTT) {
+    const sttService = await STTService.getInstance();
+    const { text } = await processAudioFile({ req, file, sttService });
+    return await createTextFile({ text, isTranscript: true });
+  }
+
+  const shouldUseText = fileConfig.checkType(
+    file.mimetype,
+    fileConfig.text?.supportedMimeTypes || [],
+  );
+  if (!shouldUseText) {
+    throw new Error(`File type ${file.mimetype} is not supported for text parsing.`);
+  }
+
+  if (shouldUseConfiguredText) {
+    let configuredText;
+    try {
+      configuredText = await parseText({ req, file, file_id, allowNativeFallback: false });
+    } catch (err) {
+      const { errorMetadata } = getExtractionLogDetails(err);
+      logger.warn(
+        `[processProjectFileUpload] Configured RAG text extraction unavailable for ${extractionFileLabel}, using built-in document parser:`,
+        errorMetadata,
+      );
+      const documentText = await extractInspectableFileText({
         filters: appConfig?.filters,
         extract: resolveDocumentText,
       });
-      if (ocrResult) {
-        const { text } = ocrResult;
-        return await createTextFile({ text });
-      }
-      throw new Error(
-        `Unable to extract text from "${file.originalname}". The document may be image-based and requires an OCR service to process.`,
-      );
-    }
-
-    const shouldUseSTT = fileConfig.checkType(
-      file.mimetype,
-      fileConfig.stt?.supportedMimeTypes || [],
-    );
-    if (shouldUseSTT) {
-      const sttService = await STTService.getInstance();
-      const { text } = await processAudioFile({ req, file, sttService });
-      return await createTextFile({ text, isTranscript: true });
-    }
-
-    const shouldUseText = fileConfig.checkType(
-      file.mimetype,
-      fileConfig.text?.supportedMimeTypes || [],
-    );
-    if (!shouldUseText) {
-      throw new Error(`File type ${file.mimetype} is not supported for text parsing.`);
-    }
-
-    if (shouldUseConfiguredText) {
-      let configuredText;
-      try {
-        configuredText = await parseText({ req, file, file_id, allowNativeFallback: false });
-      } catch (err) {
-        const { errorMetadata } = getExtractionLogDetails(err);
-        logger.warn(
-          `[processProjectFileUpload] Configured RAG text extraction unavailable for ${extractionFileLabel}, using built-in document parser:`,
-          errorMetadata,
+      if (!documentText) {
+        throw new Error(
+          `Unable to extract text from "${file.originalname}". RAG text extraction was unavailable and the built-in parser produced no result.`,
         );
-        const documentText = await extractInspectableFileText({
-          filters: appConfig?.filters,
-          extract: resolveDocumentText,
-        });
-        if (!documentText) {
-          throw new Error(
-            `Unable to extract text from "${file.originalname}". RAG text extraction was unavailable and the built-in parser produced no result.`,
-          );
-        }
-        const { text } = documentText;
-        return await createTextFile({ text });
       }
-      return await createTextFile({ text: configuredText.text });
+      const { text } = documentText;
+      return await createTextFile({ text });
     }
-
-    const { text } = await extractInspectableFileText({
-      filters: appConfig?.filters,
-      extract: () =>
-        parseText({
-          req,
-          file,
-          file_id,
-          allowNativeFallback: isNativelyReadableText(file.mimetype),
-        }),
-    });
-    return await createTextFile({ text });
+    return await createTextFile({ text: configuredText.text });
   }
 
-  // tool_resource === file_search: dual storage pattern (permanent backup + Vector DB)
-  const isFileSearchEnabled =
-    (await checkCapability(req, AgentCapabilities.file_search)) &&
-    (await resolveToolRoleGrants({ req, getRoleByName: db.getRoleByName, context: 'fileUpload' }))
-      .fileSearch;
-  if (!isFileSearchEnabled) {
-    throw new Error('File search is not enabled');
-  }
-
-  const source = getFileStrategy(appConfig, { isImage: false });
-  const { handleFileUpload } = getStrategyFunctions(source);
-  const sanitizedUploadFn = createSanitizedUploadWrapper(handleFileUpload);
-  const storageResult = await sanitizedUploadFn({ req, file, file_id, basePath, entity_id });
-
-  const { uploadVectors } = require('./VectorDB/crud');
-  const embeddingResult = await uploadVectors({ req, file, file_id, entity_id });
-
-  const {
-    bytes,
-    storageKey: _storageKey,
-    storageRegion: _storageRegion,
-    height,
-    width,
-  } = storageResult;
-  const filename = embeddingResult?.filename || storageResult.filename;
-  const embedded = embeddingResult?.embedded;
-  const filepath = storageResult.filepath;
-  const storageMetadata = getStorageMetadata({
-    filepath,
-    source,
-    storageKey: _storageKey,
-    storageRegion: _storageRegion,
+  const { text } = await extractInspectableFileText({
+    filters: appConfig?.filters,
+    extract: () =>
+      parseText({
+        req,
+        file,
+        file_id,
+        allowNativeFallback: isNativelyReadableText(file.mimetype),
+      }),
   });
-
-  await db.addProjectResourceFile({
-    user: req.user.id,
-    projectId: project_id,
-    tool_resource,
-    file_id,
-  });
-
-  const retentionExpiry = await getAgentFileRetentionExpiry({
-    req,
-    messageAttachment: false,
-    tool_resource,
-  });
-  const fileInfo = {
-    ...removeNullishValues({
-      user: req.user.id,
-      file_id,
-      temp_file_id,
-      bytes,
-      filepath,
-      ...storageMetadata,
-      filename: filename ?? sanitizeFilename(file.originalname),
-      context: FileContext.projects,
-      /* Vectors live under the entity that embedded them; recording it here mirrors
-       * `processAgentFileUpload` so a future re-embedding check has a namespace to read. */
-      metadata: { embeddedEntities: [entity_id] },
-      type: file.mimetype,
-      embedded,
-      source,
-      height,
-      width,
-      tenantId: req.user.tenantId,
-    }),
-    ...retentionExpiry,
-  };
-
-  const result = await db.createFile(fileInfo, true);
-  sendUploadSuccess(res, sseStream, 'Project file uploaded and processed successfully', result);
+  return await createTextFile({ text });
 };
 
 /**

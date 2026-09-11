@@ -591,26 +591,51 @@ describe('resolveUploadErrorMessage', () => {
     expect(result).not.toContain('PRIVATE-UPLOAD');
   });
 
-  test('preserves the capability-disabled message for file search', () => {
-    expect(resolveUploadErrorMessage({ message: 'File search is not enabled for Agents' })).toBe(
-      'File search is not enabled for Agents',
-    );
-  });
-
-  test('maps the capability-disabled message for file search when redaction is enabled', () => {
-    expect(
-      resolveUploadErrorMessage(
-        { message: 'File search is not enabled for Agents' },
-        undefined,
-        true,
-      ),
-    ).toBe('File search is not enabled for this deployment');
-  });
-
   test('preserves the project-not-found message', () => {
     expect(
       resolveUploadErrorMessage({ message: 'Project not found for project file upload' }),
     ).toBe('Project not found for project file upload');
+  });
+
+  test('maps the project-not-found message to a fixed message when redaction is enabled', () => {
+    const result = resolveUploadErrorMessage(
+      { message: 'Project not found for project file upload' },
+      undefined,
+      true,
+    );
+
+    expect(result).toBe('Project not found');
+  });
+
+  test('preserves the capability-disabled message for OCR', () => {
+    expect(resolveUploadErrorMessage({ message: 'OCR capability is not enabled' })).toBe(
+      'OCR capability is not enabled',
+    );
+  });
+
+  test('maps the capability-disabled message for OCR when redaction is enabled', () => {
+    const result = resolveUploadErrorMessage(
+      { message: 'OCR capability is not enabled' },
+      undefined,
+      true,
+    );
+
+    expect(result).toBe('OCR is not enabled for this deployment');
+  });
+
+  test('preserves the unsupported-text-parsing message', () => {
+    const msg = 'File type image/heic is not supported for text parsing.';
+    expect(resolveUploadErrorMessage({ message: msg })).toBe(msg);
+  });
+
+  test('maps the unsupported-text-parsing message when redaction is enabled', () => {
+    const result = resolveUploadErrorMessage(
+      { message: 'File type image/heic is not supported for text parsing.' },
+      undefined,
+      true,
+    );
+
+    expect(result).toBe('This file type is not supported for text extraction');
   });
 
   test('accepts a custom default message', () => {

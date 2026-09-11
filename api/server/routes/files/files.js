@@ -153,10 +153,10 @@ router.get('/agent/:agent_id', async (req, res) => {
 });
 
 /**
- * Get files specific to a project
+ * Get knowledge files specific to a Project
  * @route GET /files/project/:project_id
- * @param {string} project_id - The project ID to get files for
- * @returns {Promise<TFile[]>} Array of files attached to the project
+ * @param {string} project_id - The project ID to get knowledge files for
+ * @returns {Promise<TFile[]>} Array of files attached to the project's knowledge
  */
 router.get('/project/:project_id', async (req, res) => {
   try {
@@ -172,22 +172,12 @@ router.get('/project/:project_id', async (req, res) => {
       return res.status(200).json([]);
     }
 
-    const projectFileIds = new Set();
-    if (project.tool_resources) {
-      for (const [, resource] of Object.entries(project.tool_resources)) {
-        if (resource?.file_ids && Array.isArray(resource.file_ids)) {
-          resource.file_ids.forEach((fileId) => projectFileIds.add(fileId));
-        }
-      }
-    }
-
-    if (projectFileIds.size === 0) {
+    const fileIds = project.tool_resources?.[EToolResources.context]?.file_ids ?? [];
+    if (fileIds.length === 0) {
       return res.status(200).json([]);
     }
 
-    const files = await db.getFiles({ file_id: { $in: [...projectFileIds] } }, null, {
-      text: 0,
-    });
+    const files = await db.getFiles({ file_id: { $in: fileIds } }, null, { text: 0 });
 
     res.status(200).json(files);
   } catch (error) {
@@ -308,10 +298,7 @@ router.delete('/', async (req, res) => {
     }
 
     if (req.body.project_id && req.body.tool_resource) {
-      if (
-        req.body.tool_resource !== EToolResources.file_search &&
-        req.body.tool_resource !== EToolResources.context
-      ) {
+      if (req.body.tool_resource !== EToolResources.context) {
         return res.status(400).json({ message: 'Invalid project tool resource' });
       }
 
@@ -321,10 +308,10 @@ router.delete('/', async (req, res) => {
       }
 
       const toolResourceFiles = project.tool_resources?.[req.body.tool_resource]?.file_ids ?? [];
-      const projectFiles = files
+      const projectFileIds = files
         .filter((f) => toolResourceFiles.includes(f.file_id))
-        .map((file) => ({ tool_resource: req.body.tool_resource, file_id: file.file_id }));
-      if (projectFiles.length === 0) {
+        .map((file) => file.file_id);
+      if (projectFileIds.length === 0) {
         res.status(200).json({ message: 'File associations removed successfully from project' });
         return;
       }
@@ -332,7 +319,7 @@ router.delete('/', async (req, res) => {
       await db.removeProjectResourceFiles({
         user: req.user.id,
         projectId: req.body.project_id,
-        files: projectFiles,
+        file_ids: projectFileIds,
       });
       res.status(200).json({ message: 'File associations removed successfully from project' });
       return;
@@ -946,12 +933,10 @@ const handleFileUpload = async (req, res) => {
       });
     }
 
+    openSseStreamIfRequested();
     if (metadata.project_id) {
-      openSseStreamIfRequested();
       return await processProjectFileUpload({ req, res, metadata, sseStream });
     }
-
-    openSseStreamIfRequested();
     return await processAgentFileUpload({ req, res, metadata, sseStream });
   } catch (error) {
     if (

@@ -2964,9 +2964,6 @@ class AgentClient extends BaseClient {
      */
     const ephemeralAgent = this.options.req.body.ephemeralAgent;
     const mcpManager = getMCPManager();
-    /** Project knowledge (instructions + context files) for the conversation's Project,
-     *  if any. Resolved once per run and only applied to the primary agent below,
-     *  mirroring how `ephemeralAgent` is scoped. */
     const projectContext = this.options.chatProjectId
       ? buildProjectContext(
           await db.getChatProject(

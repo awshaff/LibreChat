@@ -407,7 +407,8 @@ export type TChatProject = {
   lastConversationId?: string | null;
   createdAt: string;
   updatedAt: string;
-  tool_resources?: Pick<AgentToolResources, EToolResources.file_search | EToolResources.context>;
+  /** Project knowledge: full-text context files available to every chat in this project. */
+  tool_resources?: Pick<AgentToolResources, EToolResources.context>;
 };
 
 export type TCreateChatProjectRequest = {

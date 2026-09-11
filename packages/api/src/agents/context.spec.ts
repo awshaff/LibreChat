@@ -302,63 +302,62 @@ describe('Agent Context Utilities', () => {
   });
 
   describe('buildProjectContext', () => {
-    it('should return undefined for a null project', () => {
+    it('returns undefined for a null/missing project', () => {
       expect(buildProjectContext(null)).toBeUndefined();
+      expect(buildProjectContext(undefined)).toBeUndefined();
     });
 
-    it('should return undefined when the project has neither description nor context files', () => {
-      expect(buildProjectContext({ name: 'Empty Project' })).toBeUndefined();
+    it('returns undefined when the project has no description and no context files', () => {
+      expect(buildProjectContext({ name: 'Alpha' })).toEqual({
+        instructions: 'Project: Alpha',
+        contextFileIds: undefined,
+      });
     });
 
-    it('should build instructions from name and description', () => {
-      const result = buildProjectContext({ name: 'Customer Alpha', description: 'A big client' });
-
-      expect(result?.instructions).toBe('Project: Customer Alpha\nA big client');
-      expect(result?.contextFileIds).toBeUndefined();
-    });
-
-    it('should build instructions from name alone when there is no description', () => {
-      const result = buildProjectContext({ name: 'Customer Alpha' });
-
-      expect(result?.instructions).toBe('Project: Customer Alpha');
-    });
-
-    it('should surface context file_ids even without a description', () => {
+    it('combines name and description into instructions and surfaces context file_ids', () => {
       const result = buildProjectContext({
-        name: 'Customer Alpha',
-        tool_resources: { context: { file_ids: ['file-1'] } },
+        name: 'Research',
+        description: 'Notes on the migration.',
+        tool_resources: { context: { file_ids: ['file-1', 'file-2'] } },
       });
 
-      expect(result?.contextFileIds).toEqual(['file-1']);
+      expect(result).toEqual({
+        instructions: 'Project: Research\nNotes on the migration.',
+        contextFileIds: ['file-1', 'file-2'],
+      });
+    });
+
+    it('returns undefined when name is empty and there are no context files', () => {
+      expect(buildProjectContext({ name: '', description: '' })).toBeUndefined();
     });
   });
 
   describe('mergeProjectContextFiles', () => {
-    it('should be a no-op when there are no project context file_ids', () => {
+    it('does nothing when no context file_ids are given', () => {
       const agent: AgentWithTools = { id: 'test-agent' };
       mergeProjectContextFiles(agent, undefined);
+      expect(agent.tool_resources).toBeUndefined();
 
+      mergeProjectContextFiles(agent, []);
       expect(agent.tool_resources).toBeUndefined();
     });
 
-    it('should add project file_ids to an agent with no existing context resource', () => {
+    it('merges project file_ids into the agent context tool_resources', () => {
       const agent: AgentWithTools = { id: 'test-agent' };
-      mergeProjectContextFiles(agent, ['project-file-1']);
-
-      expect(agent.tool_resources?.context?.file_ids).toEqual(['project-file-1']);
+      mergeProjectContextFiles(agent, ['proj-file-1', 'proj-file-2']);
+      expect(agent.tool_resources?.context?.file_ids).toEqual(['proj-file-1', 'proj-file-2']);
     });
 
-    it("should merge project file_ids alongside the agent's own context files, deduplicating", () => {
+    it('dedupes against the agent own existing context file_ids', () => {
       const agent: AgentWithTools = {
         id: 'test-agent',
-        tool_resources: { context: { file_ids: ['agent-file-1', 'shared-file'] } },
+        tool_resources: { context: { file_ids: ['agent-file', 'shared-file'] } },
       };
-      mergeProjectContextFiles(agent, ['shared-file', 'project-file-1']);
-
+      mergeProjectContextFiles(agent, ['shared-file', 'proj-file']);
       expect(agent.tool_resources?.context?.file_ids).toEqual([
-        'agent-file-1',
+        'agent-file',
         'shared-file',
-        'project-file-1',
+        'proj-file',
       ]);
     });
   });
@@ -638,6 +637,7 @@ describe('Agent Context Utilities', () => {
       const agent: AgentWithTools = {
         id: 'test-agent',
         instructions: 'Base instructions',
+        tool_resources: { context: { file_ids: ['agent-file'] } },
         tools: [],
       };
 
@@ -648,13 +648,13 @@ describe('Agent Context Utilities', () => {
         sharedRunContext: '',
         mcpManager: mockMCPManager,
         projectContext: {
-          instructions: 'Project: Customer Alpha\nA big client',
-          contextFileIds: ['project-file-1'],
+          instructions: 'Project: Research\nBackground notes.',
+          contextFileIds: ['project-file'],
         },
       });
 
-      expect(agent.instructions).toBe('Base instructions\n\nProject: Customer Alpha\nA big client');
-      expect(agent.tool_resources?.context?.file_ids).toEqual(['project-file-1']);
+      expect(agent.instructions).toBe('Base instructions\n\nProject: Research\nBackground notes.');
+      expect(agent.tool_resources?.context?.file_ids).toEqual(['agent-file', 'project-file']);
     });
 
     it('should still apply project instructions when the MCP fetch fails', async () => {
@@ -677,10 +677,10 @@ describe('Agent Context Utilities', () => {
         agent,
         sharedRunContext: '',
         mcpManager: mockMCPManager,
-        projectContext: { instructions: 'Project: Customer Alpha' },
+        projectContext: { instructions: 'Project: Research' },
       });
 
-      expect(agent.instructions).toBe('Base instructions\n\nProject: Customer Alpha');
+      expect(agent.instructions).toBe('Base instructions\n\nProject: Research');
     });
   });
 });

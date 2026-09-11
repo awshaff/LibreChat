@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { dataService, DynamicQueryKeys, QueryKeys } from 'librechat-data-provider';
+import { dataService, QueryKeys, DynamicQueryKeys } from 'librechat-data-provider';
 import type {
   UseInfiniteQueryOptions,
   QueryObserverResult,
@@ -59,9 +59,12 @@ export const useProjectFilesQuery = (
 ): QueryObserverResult<TFile[], unknown> => {
   return useQuery<TFile[]>(
     DynamicQueryKeys.projectFiles(projectId ?? ''),
-    () => dataService.getProjectFiles(projectId ?? ''),
+    () => (projectId ? dataService.getProjectFiles(projectId) : Promise.resolve([])),
     {
       enabled: Boolean(projectId),
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      refetchOnMount: false,
       ...config,
     },
   );
