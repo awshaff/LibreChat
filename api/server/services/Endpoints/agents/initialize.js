@@ -686,6 +686,7 @@ const initializeClient = async ({
       checkSessionsAlive,
       loadCodeApiKey,
       updateFile: db.updateFile,
+      getChatProject: db.getChatProject,
     },
   );
 

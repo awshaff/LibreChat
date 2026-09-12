@@ -113,6 +113,7 @@ import { filterFilesByEndpointRuntimeConfig } from '~/files';
 import { hasActiveFileFieldPolicy } from '~/protection';
 import { PARTIAL_RESOLVED_CONVERSATION } from './guard';
 import { applyBackgroundToolCalls } from './background';
+import { mergeProjectContextFiles } from './context';
 import { generateArtifactsPrompt } from '~/prompts';
 import { getProviderConfig } from '~/endpoints';
 import { primeResources } from './resources';
@@ -851,6 +852,13 @@ export interface InitializeAgentDbMethods extends EndpointDbMethods {
   loadCodeApiKey?: TLoadCodeApiKey;
   /** Optional: persist file metadata updates after provisioning */
   updateFile?: (data: TFileUpdate) => Promise<unknown>;
+  /** Optional: resolve the Project a conversation is scoped to, so its knowledge
+   *  file_ids can be merged into the agent's own `tool_resources.context` before
+   *  resource priming builds the model-bound attachment text. */
+  getChatProject?: (
+    user: string,
+    projectId: string,
+  ) => Promise<{ tool_resources?: AgentToolResources } | null>;
 }
 
 /**
@@ -1448,6 +1456,18 @@ export async function initializeAgent(
       user: requestFileOwnerId,
       tenantId: user?.tenantId,
     });
+  }
+
+  /**
+   * A Project's knowledge file_ids must be part of `agent.tool_resources.context`
+   * before `primeResources` runs below: that call is what turns file_ids into the
+   * hydrated `agentContextAttachments` text the model actually sees, and nothing
+   * downstream re-resolves the id list against file content afterward.
+   */
+  const chatProjectId = endpointOption?.chatProjectId;
+  if (chatProjectId && requestFileOwnerId && db.getChatProject) {
+    const project = await db.getChatProject(requestFileOwnerId, chatProjectId);
+    mergeProjectContextFiles(agent, project?.tool_resources?.context?.file_ids);
   }
 
   const {
