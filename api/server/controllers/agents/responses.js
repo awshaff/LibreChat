@@ -854,7 +854,10 @@ const executeResponse = async (envelope, { req, res }) => {
           defaultActiveOnShare,
           manualSkills,
         },
-        dbMethods,
+        /** Only the primary agent resolves Project knowledge — `getChatProject` is
+         *  deliberately kept off the shared `dbMethods` handed to handoff/subagent
+         *  initialization below, so a project's files stay scoped to the root agent. */
+        { ...dbMethods, getChatProject: db.getChatProject },
       );
 
       /**
