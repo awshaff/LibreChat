@@ -51,6 +51,7 @@ const {
   isContentTraversalProtected,
   isContentTraversalLimitError,
   assertModelBoundContent,
+  reportLocatorTraversalFailure,
   hasModelBoundContentProtection,
   isContentFilterError,
   getSafeErrorMetadata,
@@ -751,6 +752,7 @@ const executeOpenAIChatCompletion = async (envelope, { req, res }) => {
       const manualSkillPrimes = primaryConfig.manualSkillPrimes;
       const alwaysApplySkillPrimes = primaryConfig.alwaysApplySkillPrimes;
       assertModelBoundContent({
+        onTraversalFailure: reportLocatorTraversalFailure,
         filters: appConfig?.filters,
         legacyPii: appConfig?.messageFilter?.pii,
         submittedMessages: request.messages,
