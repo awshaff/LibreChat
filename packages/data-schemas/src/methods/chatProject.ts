@@ -1,9 +1,10 @@
 import {
   MAX_CHAT_PROJECT_NAME_LENGTH,
   MAX_CHAT_PROJECT_DESCRIPTION_LENGTH,
+  MAX_CHAT_PROJECT_INSTRUCTIONS_LENGTH,
 } from 'librechat-data-provider';
 import type { FilterQuery, Model, SortOrder, Types } from 'mongoose';
-import type { IChatProject, IChatProjectDocument, IConversation } from '~/types';
+import type { IChatProject, IChatProjectDocument, IConversation, IMongoFile } from '~/types';
 import { buildRetentionVisibilityFilter } from '~/utils/retention';
 import { isValidObjectIdString } from '~/utils/objectId';
 import { escapeRegExp } from '~/utils/string';
@@ -15,6 +16,7 @@ export type ChatProjectSortDirection = 'asc' | 'desc';
 export type CreateChatProjectInput = {
   name: string;
   description?: string | null;
+  instructions?: string | null;
 };
 
 export type UpdateChatProjectInput = Partial<CreateChatProjectInput>;
@@ -56,6 +58,16 @@ export interface ChatProjectMethods {
     input: UpdateChatProjectInput,
   ): Promise<IChatProject | null>;
   deleteChatProject(user: string, projectId: string): Promise<DeleteChatProjectResult>;
+  addChatProjectKnowledgeFile(
+    user: string,
+    projectId: string,
+    fileId: string,
+  ): Promise<IChatProject | null>;
+  removeChatProjectKnowledgeFile(
+    user: string,
+    projectId: string,
+    fileId: string,
+  ): Promise<IChatProject | null>;
   assignConversationToProject(
     user: string,
     conversationId: string,
@@ -99,6 +111,7 @@ function sanitizeProjectInput(input: CreateChatProjectInput): CreateChatProjectI
   return {
     name: input.name.trim().slice(0, MAX_CHAT_PROJECT_NAME_LENGTH),
     description: input.description?.trim().slice(0, MAX_CHAT_PROJECT_DESCRIPTION_LENGTH) ?? '',
+    instructions: input.instructions?.trim().slice(0, MAX_CHAT_PROJECT_INSTRUCTIONS_LENGTH) ?? '',
   };
 }
 
@@ -337,6 +350,7 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
     const project = await ChatProject.create({
       ...sanitized,
       user,
+      knowledgeFileIds: [],
       conversationCount: 0,
       lastConversationAt: null,
       lastConversationId: null,
@@ -411,7 +425,7 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
     }
 
     const ChatProject = mongoose.models.ChatProject as Model<IChatProjectDocument>;
-    const update: Partial<Pick<IChatProject, 'name' | 'description'>> = {};
+    const update: Partial<Pick<IChatProject, 'name' | 'description' | 'instructions'>> = {};
     if (typeof input.name === 'string') {
       const name = input.name.trim().slice(0, MAX_CHAT_PROJECT_NAME_LENGTH);
       if (!name) {
@@ -422,6 +436,10 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
     if (input.description !== undefined) {
       update.description =
         input.description?.trim().slice(0, MAX_CHAT_PROJECT_DESCRIPTION_LENGTH) ?? '';
+    }
+    if (input.instructions !== undefined) {
+      update.instructions =
+        input.instructions?.trim().slice(0, MAX_CHAT_PROJECT_INSTRUCTIONS_LENGTH) ?? '';
     }
 
     return await ChatProject.findOneAndUpdate(
@@ -441,6 +459,7 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
 
     const ChatProject = mongoose.models.ChatProject as Model<IChatProjectDocument>;
     const Conversation = mongoose.models.Conversation as Model<IConversation>;
+    const File = mongoose.models.File as Model<IMongoFile>;
     const projectFilter = { _id: new mongoose.Types.ObjectId(projectId), user };
     const project = await ChatProject.findOne(projectFilter).select('_id').lean<IChatProject>();
     if (!project) {
@@ -453,12 +472,47 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
         { $unset: { chatProjectId: '' } },
       ),
       ChatProject.deleteOne(projectFilter),
+      File.deleteMany({ user, chatProjectId: projectId }),
     ]);
 
     return {
       deletedCount: deleteResult.deletedCount ?? 0,
       modifiedCount: conversationResult.modifiedCount ?? 0,
     };
+  }
+
+  async function addChatProjectKnowledgeFile(
+    user: string,
+    projectId: string,
+    fileId: string,
+  ): Promise<IChatProject | null> {
+    if (!isValidObjectIdString(projectId)) {
+      return null;
+    }
+
+    const ChatProject = mongoose.models.ChatProject as Model<IChatProjectDocument>;
+    return await ChatProject.findOneAndUpdate(
+      { _id: new mongoose.Types.ObjectId(projectId), user },
+      { $addToSet: { knowledgeFileIds: fileId } },
+      { new: true },
+    ).lean<IChatProject>();
+  }
+
+  async function removeChatProjectKnowledgeFile(
+    user: string,
+    projectId: string,
+    fileId: string,
+  ): Promise<IChatProject | null> {
+    if (!isValidObjectIdString(projectId)) {
+      return null;
+    }
+
+    const ChatProject = mongoose.models.ChatProject as Model<IChatProjectDocument>;
+    return await ChatProject.findOneAndUpdate(
+      { _id: new mongoose.Types.ObjectId(projectId), user },
+      { $pull: { knowledgeFileIds: fileId } },
+      { new: true },
+    ).lean<IChatProject>();
   }
 
   async function assignConversationToProject(
@@ -531,6 +585,8 @@ export function createChatProjectMethods(mongoose: typeof import('mongoose')): C
     listChatProjects,
     updateChatProject,
     deleteChatProject,
+    addChatProjectKnowledgeFile,
+    removeChatProjectKnowledgeFile,
     assignConversationToProject,
     refreshChatProjectStats,
   };

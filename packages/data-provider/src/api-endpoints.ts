@@ -168,6 +168,11 @@ export const projectById = (id: string) => `${projectsRoot}/${encodeURIComponent
 export const projectConversation = (conversationId: string) =>
   `${projectsRoot}/conversations/${encodeURIComponent(conversationId)}`;
 
+export const projectFiles = (id: string) => `${projectsRoot}/${encodeURIComponent(id)}/files`;
+
+export const projectKnowledgeBudget = (id: string, params: { endpoint: string; model: string }) =>
+  `${projectsRoot}/${encodeURIComponent(id)}/knowledge/budget${buildQuery(params)}`;
+
 export const search = (q: string, cursor?: string | null) =>
   `${BASE_URL}/api/search?q=${q}${cursor ? `&cursor=${cursor}` : ''}`;
 

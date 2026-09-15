@@ -30,6 +30,11 @@ export function getAttachmentTitleText(files?: TFile[] | null): string {
   return filenames.length > 0 ? `Attached file(s): ${filenames.join(', ')}` : '';
 }
 
+export type FileContextResult = {
+  text: string | undefined;
+  wasTruncated: boolean;
+};
+
 /**
  * Extracts text context from attachments and returns formatted text.
  * This handles text that was already extracted from files (OCR, transcriptions, document text, etc.)
@@ -37,41 +42,53 @@ export function getAttachmentTitleText(files?: TFile[] | null): string {
  * @param params.attachments - Array of file attachments
  * @param params.req - Express request object for config access
  * @param params.tokenCountFn - Function to count tokens in text
- * @returns The formatted file context text, or undefined if no text found
+ * @param params.fileTokenLimit - Optional explicit per-file token limit override,
+ *   taking precedence over `req.body.fileTokenLimit`/the configured default. Callers
+ *   that already resolved a caller-specific budget (e.g. a per-project split) pass
+ *   this instead of relying on the request body.
+ * @returns The formatted file context text (or undefined if no text found), and
+ *   whether any file's text was truncated to fit the token limit.
  */
 export async function extractFileContext({
   attachments,
   req,
   tokenCountFn,
+  fileTokenLimit: fileTokenLimitOverride,
 }: {
   attachments: IMongoFile[];
   req?: ServerRequest;
   tokenCountFn: TokenCountFn;
-}): Promise<string | undefined> {
+  fileTokenLimit?: number;
+}): Promise<FileContextResult> {
   if (!attachments || attachments.length === 0) {
-    return undefined;
+    return { text: undefined, wasTruncated: false };
   }
 
   const fileConfig = mergeFileConfig(req?.config?.fileConfig);
-  const fileTokenLimit = req?.body?.fileTokenLimit ?? fileConfig.fileTokenLimit;
+  const fileTokenLimit =
+    fileTokenLimitOverride ?? req?.body?.fileTokenLimit ?? fileConfig.fileTokenLimit;
 
   if (!fileTokenLimit) {
     // If no token limit, return undefined (no processing)
-    return undefined;
+    return { text: undefined, wasTruncated: false };
   }
 
   let resultText = '';
+  let wasTruncated = false;
 
   for (const file of attachments) {
     const source = file.source ?? FileSources.local;
     if (source === FileSources.text && file.text) {
-      const { text: limitedText, wasTruncated } = await processTextWithTokenLimit({
-        text: file.text,
-        tokenLimit: fileTokenLimit,
-        tokenCountFn,
-      });
+      const { text: limitedText, wasTruncated: fileWasTruncated } = await processTextWithTokenLimit(
+        {
+          text: file.text,
+          tokenLimit: fileTokenLimit,
+          tokenCountFn,
+        },
+      );
 
-      if (wasTruncated) {
+      if (fileWasTruncated) {
+        wasTruncated = true;
         logger.debug(
           `[extractFileContext] Text content truncated for file: ${file.filename} due to token limits`,
         );
@@ -83,8 +100,8 @@ export async function extractFileContext({
 
   if (resultText) {
     resultText += '\n```';
-    return resultText;
+    return { text: resultText, wasTruncated };
   }
 
-  return undefined;
+  return { text: undefined, wasTruncated: false };
 }

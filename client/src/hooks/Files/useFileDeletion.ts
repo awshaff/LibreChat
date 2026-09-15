@@ -20,12 +20,14 @@ const useFileDeletion = ({
   mutateAsync,
   agent_id,
   assistant_id,
+  chatProjectId,
   tool_resource,
   index,
 }: {
   mutateAsync: UseMutateAsyncFunction<t.DeleteFilesResponse, unknown, t.DeleteFilesBody, unknown>;
   agent_id?: string;
   assistant_id?: string;
+  chatProjectId?: string;
   tool_resource?: EToolResources;
   index?: number;
 }) => {
@@ -37,16 +39,19 @@ const useFileDeletion = ({
       filesToDelete,
       agent_id,
       assistant_id,
+      chatProjectId,
       tool_resource,
     }: {
       filesToDelete: t.BatchFile[];
       agent_id?: string;
       assistant_id?: string;
+      chatProjectId?: string;
       tool_resource?: EToolResources;
     }) => {
       const payload = removeNullishValues({
         agent_id,
         assistant_id,
+        chatProjectId,
         tool_resource,
       });
       /** The chips are already gone by the time this runs, so a lost request leaves nothing that
@@ -54,11 +59,17 @@ const useFileDeletion = ({
        * A resolved request proves nothing on its own, since a failed storage delete is reported
        * as a 200 naming the file in `failedFileIds`. */
       const retainBatch = (files: t.BatchFile[]): void => {
-        /** Only a plain deletion belongs in the shared retry queue. An agent or assistant unlink
-         * carries context the retry does not replay, and without it the route would take the
-         * ordinary delete branch and destroy a record other references still point at. Nothing is
-         * orphaned by a failed unlink either: the file and its links are all still there. */
-        if (agent_id != null || assistant_id != null || tool_resource != null) {
+        /** Only a plain deletion belongs in the shared retry queue. An agent, assistant, or
+         * project-knowledge unlink carries context the retry does not replay, and without it the
+         * route would take the ordinary delete branch and destroy a record other references still
+         * point at. Nothing is orphaned by a failed unlink either: the file and its links are all
+         * still there. */
+        if (
+          agent_id != null ||
+          assistant_id != null ||
+          chatProjectId != null ||
+          tool_resource != null
+        ) {
           return;
         }
         for (const file of files) {
@@ -148,12 +159,21 @@ const useFileDeletion = ({
           filesToDelete: newBatch,
           agent_id,
           assistant_id,
+          chatProjectId,
           tool_resource,
         });
         return newBatch;
       });
     },
-    [debouncedDelete, setFilesToDelete, agent_id, assistant_id, tool_resource, index],
+    [
+      debouncedDelete,
+      setFilesToDelete,
+      agent_id,
+      assistant_id,
+      chatProjectId,
+      tool_resource,
+      index,
+    ],
   );
 
   const deleteFiles = useCallback(
@@ -212,11 +232,12 @@ const useFileDeletion = ({
           filesToDelete: newBatch,
           agent_id,
           assistant_id,
+          chatProjectId,
         });
         return newBatch;
       });
     },
-    [debouncedDelete, setFilesToDelete, agent_id, assistant_id, index],
+    [debouncedDelete, setFilesToDelete, agent_id, assistant_id, chatProjectId, index],
   );
 
   return { deleteFile, deleteFiles };

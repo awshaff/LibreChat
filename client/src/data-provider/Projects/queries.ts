@@ -1,11 +1,18 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { dataService, QueryKeys } from 'librechat-data-provider';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import type {
+  ProjectListParams,
+  ProjectListResponse,
+  TProjectKnowledgeBudgetParams,
+  TProjectKnowledgeBudgetResponse,
+  TChatProject,
+  TFile,
+} from 'librechat-data-provider';
 import type {
   UseInfiniteQueryOptions,
   QueryObserverResult,
   UseQueryOptions,
 } from '@tanstack/react-query';
-import type { ProjectListParams, ProjectListResponse, TChatProject } from 'librechat-data-provider';
 
 export const useProjectsInfiniteQuery = (
   params: ProjectListParams = {},
@@ -43,6 +50,37 @@ export const useProjectQuery = (
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       refetchOnMount: false,
+      ...config,
+    },
+  );
+};
+
+export const useProjectKnowledgeFilesQuery = (
+  projectId?: string | null,
+  config?: UseQueryOptions<TFile[]>,
+): QueryObserverResult<TFile[], unknown> => {
+  return useQuery<TFile[]>(
+    [QueryKeys.projectFiles, projectId],
+    () => dataService.getProjectFiles(projectId ?? ''),
+    {
+      enabled: Boolean(projectId),
+      refetchOnWindowFocus: false,
+      ...config,
+    },
+  );
+};
+
+export const useProjectKnowledgeBudgetQuery = (
+  projectId: string | null | undefined,
+  params: TProjectKnowledgeBudgetParams,
+  config?: UseQueryOptions<TProjectKnowledgeBudgetResponse>,
+): QueryObserverResult<TProjectKnowledgeBudgetResponse, unknown> => {
+  return useQuery<TProjectKnowledgeBudgetResponse>(
+    [QueryKeys.projectKnowledgeBudget, projectId, params.endpoint, params.model],
+    () => dataService.getProjectKnowledgeBudget(projectId ?? '', params),
+    {
+      enabled: Boolean(projectId) && Boolean(params.endpoint) && Boolean(params.model),
+      refetchOnWindowFocus: false,
       ...config,
     },
   );

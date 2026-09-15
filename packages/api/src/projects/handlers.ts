@@ -1,3 +1,4 @@
+import { EModelEndpoint } from 'librechat-data-provider';
 import { isValidObjectIdString, logger } from '@librechat/data-schemas';
 
 import type {
@@ -5,9 +6,13 @@ import type {
   ChatProjectSortBy,
   ChatProjectSortDirection,
   CreateChatProjectInput,
+  IMongoFile,
   UpdateChatProjectInput,
 } from '@librechat/data-schemas';
 import type { Request, Response } from 'express';
+import type { FilterQuery } from 'mongoose';
+import { getModelMaxTokens } from '~/utils/tokens';
+import { countTokens } from '~/utils/tokenizer';
 
 const PROJECT_NOT_FOUND = 'Project not found';
 const CONVERSATION_NOT_FOUND = 'Conversation not found';
@@ -33,7 +38,13 @@ type ProjectHandlerDependencies = Pick<
   | 'updateChatProject'
   | 'deleteChatProject'
   | 'assignConversationToProject'
->;
+> & {
+  getFiles: (
+    filter: FilterQuery<IMongoFile>,
+    sortOptions?: Record<string, 1 | -1> | null,
+    selectFields?: Record<string, 0 | 1> | null,
+  ) => Promise<IMongoFile[] | null>;
+};
 
 const getUserId = (req: ProjectRequest): string => req.user?.id ?? req.user?._id?.toString() ?? '';
 
@@ -81,6 +92,7 @@ const createProjectInput = (req: ProjectRequest): CreateChatProjectInput | null 
   return {
     name,
     description: typeof req.body?.description === 'string' ? req.body.description : '',
+    instructions: typeof req.body?.instructions === 'string' ? req.body.instructions : '',
   };
 };
 
@@ -91,6 +103,8 @@ export function createProjectHandlers(deps: ProjectHandlerDependencies): {
   getProject: (req: ProjectRequest, res: Response) => Promise<Response>;
   updateProject: (req: ProjectRequest, res: Response) => Promise<Response>;
   deleteProject: (req: ProjectRequest, res: Response) => Promise<Response>;
+  listProjectFiles: (req: ProjectRequest, res: Response) => Promise<Response>;
+  getProjectKnowledgeBudget: (req: ProjectRequest, res: Response) => Promise<Response>;
 } {
   async function listProjects(req: ProjectRequest, res: Response): Promise<Response> {
     try {
@@ -188,6 +202,9 @@ export function createProjectHandlers(deps: ProjectHandlerDependencies): {
     if (req.body?.description !== undefined) {
       input.description = typeof req.body.description === 'string' ? req.body.description : '';
     }
+    if (req.body?.instructions !== undefined) {
+      input.instructions = typeof req.body.instructions === 'string' ? req.body.instructions : '';
+    }
 
     try {
       const project = await deps.updateChatProject(getUserId(req), projectId, input);
@@ -219,6 +236,87 @@ export function createProjectHandlers(deps: ProjectHandlerDependencies): {
     }
   }
 
+  async function listProjectFiles(req: ProjectRequest, res: Response): Promise<Response> {
+    const { projectId } = req.params;
+    if (!isValidObjectIdString(projectId)) {
+      return res.status(404).json({ error: PROJECT_NOT_FOUND });
+    }
+
+    try {
+      const userId = getUserId(req);
+      const project = await deps.getChatProject(userId, projectId);
+      if (!project) {
+        return res.status(404).json({ error: PROJECT_NOT_FOUND });
+      }
+
+      const files = await deps.getFiles(
+        { chatProjectId: projectId, user: userId } as FilterQuery<IMongoFile>,
+        null,
+        { text: 0 },
+      );
+      return res.status(200).json(files ?? []);
+    } catch (error) {
+      logger.error('[projects] Error listing project files', error);
+      return res.status(500).json({ error: 'Error listing project files' });
+    }
+  }
+
+  async function getProjectKnowledgeBudget(req: ProjectRequest, res: Response): Promise<Response> {
+    const { projectId } = req.params;
+    if (!isValidObjectIdString(projectId)) {
+      return res.status(404).json({ error: PROJECT_NOT_FOUND });
+    }
+
+    const model = queryString(req.query.model);
+    const endpoint = queryString(req.query.endpoint);
+    if (!model || !endpoint) {
+      return res.status(400).json({ error: 'model and endpoint are required' });
+    }
+
+    try {
+      const userId = getUserId(req);
+      const project = await deps.getChatProject(userId, projectId);
+      if (!project) {
+        return res.status(404).json({ error: PROJECT_NOT_FOUND });
+      }
+
+      const instructionsText = project.instructions?.trim() ?? '';
+      const instructionsTokens = instructionsText ? await countTokens(instructionsText) : 0;
+
+      const knowledgeFileIds = project.knowledgeFileIds ?? [];
+      const files =
+        knowledgeFileIds.length > 0
+          ? ((await deps.getFiles(
+              { file_id: { $in: knowledgeFileIds }, user: userId } as FilterQuery<IMongoFile>,
+              null,
+              { file_id: 1, filename: 1, text: 1 },
+            )) ?? [])
+          : [];
+
+      const fileBreakdown = await Promise.all(
+        files.map(async (file) => ({
+          file_id: file.file_id,
+          filename: file.filename,
+          tokens: file.text ? await countTokens(file.text) : 0,
+        })),
+      );
+
+      const totalTokens =
+        instructionsTokens + fileBreakdown.reduce((sum, file) => sum + file.tokens, 0);
+      const maxContextTokens = getModelMaxTokens(model, endpoint as EModelEndpoint);
+
+      return res.status(200).json({
+        instructionsTokens,
+        files: fileBreakdown,
+        totalTokens,
+        maxContextTokens: maxContextTokens ?? null,
+      });
+    } catch (error) {
+      logger.error('[projects] Error computing project knowledge budget', error);
+      return res.status(500).json({ error: 'Error computing project knowledge budget' });
+    }
+  }
+
   return {
     listProjects,
     createProject,
@@ -226,5 +324,7 @@ export function createProjectHandlers(deps: ProjectHandlerDependencies): {
     getProject,
     updateProject,
     deleteProject,
+    listProjectFiles,
+    getProjectKnowledgeBudget,
   };
 }

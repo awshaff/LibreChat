@@ -1695,7 +1695,7 @@ class BaseClient {
    * @returns {Promise<void>}
    */
   async addFileContextToMessage(message, attachments) {
-    const fileContext = await extractFileContext({
+    const { text: fileContext } = await extractFileContext({
       attachments,
       req: this.options?.req,
       tokenCountFn: (text) => countTokens(text),

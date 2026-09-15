@@ -116,6 +116,7 @@ const {
   collectFileIds,
   processTextWithTokenLimit,
   buildAgentScopedContext,
+  buildProjectKnowledgeContext,
   buildAgentContextAttachmentsByAgentId,
   buildSkillPrimeContentParts,
   buildInitialToolSessions,
@@ -2442,10 +2443,24 @@ class AgentClient extends BaseClient {
      * Memory context is handled separately and applied per-agent based on config.
      */
     const sharedRunContextParts = [];
-    const [augmentedPrompt, [memories, configServers], agentScopedContext] = await Promise.all([
+    const [
+      augmentedPrompt,
+      [memories, configServers],
+      agentScopedContext,
+      projectKnowledgeContext,
+    ] = await Promise.all([
       this.contextHandlers?.createContext(),
       earlySharedContextPromise,
       agentScopedContextPromise,
+      buildProjectKnowledgeContext({
+        chatProjectId: this.options.chatProjectId,
+        userId: this.options.req.user.id + '',
+        req: this.options.req,
+        maxContextTokens: this.maxContextTokens,
+        tokenCountFn: countTokens,
+        getChatProject: db.getChatProject,
+        getFiles: db.getFiles,
+      }),
     ]);
 
     /** Augmented prompt from RAG/context handlers */
@@ -2453,6 +2468,14 @@ class AgentClient extends BaseClient {
     if (this.augmentedPrompt) {
       modelBoundFileContexts.add(this.augmentedPrompt);
       sharedRunContextParts.push(this.augmentedPrompt);
+    }
+
+    /** Project knowledge context (files + instructions), injected for every
+     *  agent/provider in this run when the conversation belongs to a Project. */
+    this.projectKnowledgeTruncated = projectKnowledgeContext.wasTruncated;
+    if (projectKnowledgeContext.text) {
+      modelBoundFileContexts.add(projectKnowledgeContext.text);
+      sharedRunContextParts.push(projectKnowledgeContext.text);
     }
 
     /** Memory context (user preferences/memories). Keyed context (with memory
@@ -3139,6 +3162,7 @@ class AgentClient extends BaseClient {
      *   thoughtSignatures?: Record<string, string>,
      *   contextUsage?: import('librechat-data-provider').TContextUsageEvent,
      *   usage?: import('librechat-data-provider').TResponseUsage,
+     *   projectKnowledgeTruncated?: boolean,
      * }} */
     const metadata = {};
     const signatures = this.collectedThoughtSignatures;
@@ -3193,6 +3217,9 @@ class AgentClient extends BaseClient {
     const usage = aggregateEmittedUsage(usageEvents);
     if (usage) {
       metadata.usage = usage;
+    }
+    if (this.projectKnowledgeTruncated) {
+      metadata.projectKnowledgeTruncated = true;
     }
     return Object.keys(metadata).length > 0 ? metadata : undefined;
   }

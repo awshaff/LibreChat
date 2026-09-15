@@ -665,6 +665,21 @@ const processFileUpload = async ({ req, res, metadata, sseStream }) => {
 };
 
 /**
+ * Resolves the `FileContext` for a `context` tool-resource text upload: a project
+ * knowledge file, a bare chat attachment, or an agent's own context knowledge file.
+ * @param {Object} params
+ * @param {string} [params.chatProjectId]
+ * @param {boolean} params.messageAttachment
+ * @returns {string}
+ */
+const resolveTextFileContext = ({ chatProjectId, messageAttachment }) => {
+  if (chatProjectId) {
+    return FileContext.chat_project;
+  }
+  return messageAttachment ? FileContext.message_attachment : FileContext.agents;
+};
+
+/**
  * Applies the current strategy for file uploads.
  * Saves file metadata to the database with an expiry TTL.
  * Files must be deleted from the server filesystem manually.
@@ -679,11 +694,19 @@ const processFileUpload = async ({ req, res, metadata, sseStream }) => {
 const processAgentFileUpload = async ({ req, res, metadata, sseStream }) => {
   const { file } = req;
   const appConfig = req.config;
-  const { agent_id, tool_resource, file_id, temp_file_id = null } = metadata;
+  const { agent_id, tool_resource, file_id, temp_file_id = null, chatProjectId } = metadata;
 
   let messageAttachment = !!metadata.message_file;
 
-  if (agent_id && !tool_resource && !messageAttachment) {
+  if (agent_id && chatProjectId) {
+    throw new Error('A file upload cannot target both an agent and a project');
+  }
+
+  if (chatProjectId && tool_resource !== EToolResources.context) {
+    throw new Error('Project knowledge files must use the context tool resource');
+  }
+
+  if ((agent_id || chatProjectId) && !tool_resource && !messageAttachment) {
     throw new Error('No tool resource provided for agent file upload');
   }
 
@@ -691,7 +714,7 @@ const processAgentFileUpload = async ({ req, res, metadata, sseStream }) => {
     throw new Error('Image uploads are not supported for file search tool resources');
   }
 
-  if (!messageAttachment && !agent_id) {
+  if (!messageAttachment && !agent_id && !chatProjectId) {
     throw new Error('No agent ID provided for agent file upload');
   }
 
@@ -830,13 +853,16 @@ const processAgentFileUpload = async ({ req, res, metadata, sseStream }) => {
           source: FileSources.text,
           filename: file.originalname,
           model: messageAttachment ? undefined : req.body.model,
-          context: messageAttachment ? FileContext.message_attachment : FileContext.agents,
+          context: resolveTextFileContext({ chatProjectId, messageAttachment }),
+          chatProjectId,
           tenantId: req.user.tenantId,
         }),
         ...retentionExpiry,
       };
 
-      if (!messageAttachment && tool_resource) {
+      if (chatProjectId) {
+        await db.addChatProjectKnowledgeFile(req.user.id, chatProjectId, file_id);
+      } else if (!messageAttachment && tool_resource) {
         await db.addAgentResourceFile({
           file_id,
           agent_id,

@@ -30,6 +30,7 @@ export enum FileContext {
   image_generation = 'image_generation',
   assistants_output = 'assistants_output',
   message_attachment = 'message_attachment',
+  chat_project = 'chat_project',
   skill_file = 'skill_file',
   filename = 'filename',
   updatedAt = 'updatedAt',
@@ -275,6 +276,7 @@ export type DeleteFilesBody = {
   files: BatchFile[];
   agent_id?: string;
   assistant_id?: string;
+  chatProjectId?: string;
   tool_resource?: EToolResources;
 };
 

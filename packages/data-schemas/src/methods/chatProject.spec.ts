@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import type { IChatProject, IConversation } from '~/types';
+import type { IChatProject, IConversation, IMongoFile } from '~/types';
 import {
   createChatProjectMethods,
   updateChatProjectLastConversationForUser,
@@ -18,6 +18,7 @@ jest.mock('~/config/winston', () => ({
 let mongoServer: InstanceType<typeof MongoMemoryServer>;
 let ChatProject: mongoose.Model<IChatProject>;
 let Conversation: mongoose.Model<IConversation>;
+let File: mongoose.Model<IMongoFile>;
 let methods: ChatProjectMethods;
 let modelsToCleanup: string[] = [];
 
@@ -31,6 +32,7 @@ beforeAll(async () => {
 
   ChatProject = mongoose.models.ChatProject as mongoose.Model<IChatProject>;
   Conversation = mongoose.models.Conversation as mongoose.Model<IConversation>;
+  File = mongoose.models.File as mongoose.Model<IMongoFile>;
   methods = createChatProjectMethods(mongoose);
 
   await mongoose.connect(mongoUri);
@@ -50,6 +52,7 @@ afterAll(async () => {
 afterEach(async () => {
   await ChatProject.deleteMany({});
   await Conversation.deleteMany({});
+  await File.deleteMany({});
 });
 
 async function createConversation(user: string, conversationId: string, title: string) {
@@ -58,6 +61,20 @@ async function createConversation(user: string, conversationId: string, title: s
     title,
     user,
     endpoint: 'openAI',
+  });
+}
+
+/** File.user is a real ObjectId ref, unlike ChatProject/Conversation.user (plain strings)
+ *  elsewhere in this file, so knowledge-file tests need an ObjectId-shaped owner id. */
+async function createKnowledgeFile(user: string, file_id: string, filename: string) {
+  return await File.create({
+    user,
+    file_id,
+    filename,
+    filepath: `/uploads/${file_id}`,
+    object: 'file',
+    type: 'text/plain',
+    bytes: 100,
   });
 }
 
@@ -488,5 +505,74 @@ describe('ChatProject methods', () => {
     expect(otherRead).toBeNull();
     expect(assignment).toBeNull();
     expect(deleteResult.deletedCount).toBe(0);
+  });
+
+  it('persists instructions with trim and cap on create and update', async () => {
+    const project = await methods.createChatProject(user, {
+      name: 'With Instructions',
+      instructions: '  Always answer in French.  ',
+    });
+    expect(project.instructions).toBe('Always answer in French.');
+
+    const longInstructions = 'x'.repeat(30000);
+    const updated = await methods.updateChatProject(user, project._id!.toString(), {
+      instructions: longInstructions,
+    });
+    expect(updated?.instructions).toHaveLength(20000);
+
+    const cleared = await methods.updateChatProject(user, project._id!.toString(), {
+      instructions: '   ',
+    });
+    expect(cleared?.instructions).toBe('');
+  });
+
+  it('adds and removes knowledge files, idempotently, scoped to the owner', async () => {
+    const project = await methods.createChatProject(user, { name: 'Knowledge Base' });
+    const projectId = project._id!.toString();
+
+    const afterAdd = await methods.addChatProjectKnowledgeFile(user, projectId, 'file-1');
+    expect(afterAdd?.knowledgeFileIds).toEqual(['file-1']);
+
+    // Adding the same file again is a no-op ($addToSet), not a duplicate entry.
+    const afterDuplicateAdd = await methods.addChatProjectKnowledgeFile(user, projectId, 'file-1');
+    expect(afterDuplicateAdd?.knowledgeFileIds).toEqual(['file-1']);
+
+    const afterSecondAdd = await methods.addChatProjectKnowledgeFile(user, projectId, 'file-2');
+    expect(afterSecondAdd?.knowledgeFileIds?.sort()).toEqual(['file-1', 'file-2']);
+
+    const afterRemove = await methods.removeChatProjectKnowledgeFile(user, projectId, 'file-1');
+    expect(afterRemove?.knowledgeFileIds).toEqual(['file-2']);
+
+    // Removing a file that isn't there is a no-op, not an error.
+    const afterRemoveMissing = await methods.removeChatProjectKnowledgeFile(
+      user,
+      projectId,
+      'not-present',
+    );
+    expect(afterRemoveMissing?.knowledgeFileIds).toEqual(['file-2']);
+
+    const nonOwnerResult = await methods.addChatProjectKnowledgeFile(
+      otherUser,
+      projectId,
+      'file-3',
+    );
+    expect(nonOwnerResult).toBeNull();
+  });
+
+  it('deletes knowledge files when a project is deleted', async () => {
+    const ownerId = new mongoose.Types.ObjectId().toString();
+    const project = await methods.createChatProject(ownerId, { name: 'Delete Cascade' });
+    const projectId = project._id!.toString();
+
+    await createKnowledgeFile(ownerId, 'file-1', 'notes.md');
+    await createKnowledgeFile(ownerId, 'file-2', 'report.pdf');
+    await methods.addChatProjectKnowledgeFile(ownerId, projectId, 'file-1');
+    await methods.addChatProjectKnowledgeFile(ownerId, projectId, 'file-2');
+
+    const result = await methods.deleteChatProject(ownerId, projectId);
+    expect(result.deletedCount).toBe(1);
+
+    const remainingFiles = await File.find({ user: ownerId }).lean<IMongoFile[]>();
+    expect(remainingFiles).toHaveLength(0);
   });
 });

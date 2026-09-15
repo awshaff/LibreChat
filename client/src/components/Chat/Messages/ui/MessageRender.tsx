@@ -8,6 +8,7 @@ import {
   getHeaderPrefixForScreenReader,
   getMessageAriaLabel,
 } from '~/utils';
+import ProjectKnowledgeTruncatedNotice from '~/components/Chat/Messages/ProjectKnowledgeTruncatedNotice';
 import { revealOnRowHoverClasses, messageFooterClasses } from '~/components/Chat/Messages/styles';
 import { parseWakeupText } from '~/components/Chat/Messages/Content/Parts/wakeup';
 import Elapsed, { shouldShowElapsed } from '~/components/Chat/Messages/Elapsed';
@@ -217,20 +218,25 @@ const MessageRender = memo(function MessageRender({
         {wakeupDisplay != null && !edit ? (
           <Wakeup display={wakeupDisplay} conversationId={conversation?.conversationId} />
         ) : (
-          <MessageContent
-            ask={ask}
-            edit={edit}
-            isLast={isLast}
-            text={msg.text || ''}
-            message={msg}
-            enterEdit={enterEdit}
-            error={!!(msg.error ?? false)}
-            isSubmitting={isSubmitting}
-            unfinished={msg.unfinished ?? false}
-            isCreatedByUser={msg.isCreatedByUser ?? true}
-            siblingIdx={siblingIdx ?? 0}
-            setSiblingIdx={setSiblingIdx ?? (() => ({}))}
-          />
+          <>
+            {!msg.isCreatedByUser && msg.metadata?.projectKnowledgeTruncated === true ? (
+              <ProjectKnowledgeTruncatedNotice />
+            ) : null}
+            <MessageContent
+              ask={ask}
+              edit={edit}
+              isLast={isLast}
+              text={msg.text || ''}
+              message={msg}
+              enterEdit={enterEdit}
+              error={!!(msg.error ?? false)}
+              isSubmitting={isSubmitting}
+              unfinished={msg.unfinished ?? false}
+              isCreatedByUser={msg.isCreatedByUser ?? true}
+              siblingIdx={siblingIdx ?? 0}
+              setSiblingIdx={setSiblingIdx ?? (() => ({}))}
+            />
+          </>
         )}
       </MessageContext.Provider>
     </MessageRow>

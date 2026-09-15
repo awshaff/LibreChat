@@ -25,6 +25,7 @@ export default function FileRow({
   setFilesLoading,
   assistant_id,
   agent_id,
+  chatProjectId,
   tool_resource,
   index,
   fileFilter,
@@ -42,6 +43,7 @@ export default function FileRow({
   fileFilter?: (file: ExtendedFile) => boolean;
   assistant_id?: string;
   agent_id?: string;
+  chatProjectId?: string;
   tool_resource?: EToolResources;
   index?: number;
   isRTL?: boolean;
@@ -84,6 +86,7 @@ export default function FileRow({
     mutateAsync,
     agent_id,
     assistant_id,
+    chatProjectId,
     tool_resource,
     index,
   });

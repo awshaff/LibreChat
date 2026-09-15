@@ -15,9 +15,11 @@ import ProjectEditDialog from './ProjectEditDialog';
 import { useLocalize, useNewConvo } from '~/hooks';
 import { cn, clearMessagesCache } from '~/utils';
 import ProjectChatList from './ProjectChatList';
+import { KnowledgeSection } from './Knowledge';
 import store from '~/store';
 
 type ChatSortField = 'updatedAt' | 'createdAt';
+type WorkspaceTab = 'chats' | 'knowledge';
 
 function renderSortMenuItem(label: string, isSelected: boolean): RenderProp {
   return function SortMenuItem({ className, ...props }) {
@@ -40,6 +42,7 @@ export default function ProjectWorkspace() {
   const queryClient = useQueryClient();
   const { projectId = '' } = useParams();
   const [sortBy, setSortBy] = useState<ChatSortField>('updatedAt');
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('chats');
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const sortMenuId = useId();
@@ -231,45 +234,68 @@ export default function ProjectWorkspace() {
           </span>
         </button>
 
-        <section className="mt-8 flex min-h-0 flex-1 flex-col">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="flex items-baseline gap-2 text-sm font-medium text-text-primary">
-              {localize('com_ui_chats')}
-              <span className="tabular-nums text-text-secondary">{project.conversationCount}</span>
-            </h2>
-            <DropdownPopup
-              portal={true}
-              focusLoop={true}
-              unmountOnHide={true}
-              menuId={sortMenuId}
-              isOpen={isSortMenuOpen}
-              setIsOpen={setIsSortMenuOpen}
-              className="z-[125] min-w-44"
-              trigger={
-                <Ariakit.MenuButton
-                  aria-label={localize('com_ui_sort_chats_by')}
-                  className={cn(
-                    'inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary',
-                    isSortMenuOpen && 'bg-surface-hover text-text-primary',
-                  )}
-                >
-                  <ArrowUpDown className="h-4 w-4" aria-hidden="true" />
-                  {selectedSortLabel}
-                </Ariakit.MenuButton>
-              }
-              items={sortMenuItems}
+        <div className="mt-8 flex items-center gap-1 border-b border-border-light">
+          {(['chats', 'knowledge'] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={cn(
+                '-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors',
+                activeTab === tab
+                  ? 'border-text-primary text-text-primary'
+                  : 'border-transparent text-text-secondary hover:text-text-primary',
+              )}
+            >
+              {tab === 'chats' ? localize('com_ui_chats') : localize('com_ui_project_knowledge')}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'chats' ? (
+          <section className="mt-4 flex min-h-0 flex-1 flex-col">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <span className="text-sm tabular-nums text-text-secondary">
+                {project.conversationCount}
+              </span>
+              <DropdownPopup
+                portal={true}
+                focusLoop={true}
+                unmountOnHide={true}
+                menuId={sortMenuId}
+                isOpen={isSortMenuOpen}
+                setIsOpen={setIsSortMenuOpen}
+                className="z-[125] min-w-44"
+                trigger={
+                  <Ariakit.MenuButton
+                    aria-label={localize('com_ui_sort_chats_by')}
+                    className={cn(
+                      'inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary',
+                      isSortMenuOpen && 'bg-surface-hover text-text-primary',
+                    )}
+                  >
+                    <ArrowUpDown className="h-4 w-4" aria-hidden="true" />
+                    {selectedSortLabel}
+                  </Ariakit.MenuButton>
+                }
+                items={sortMenuItems}
+              />
+            </div>
+            <ProjectChatList
+              conversations={conversations}
+              isLoading={isConversationsLoading}
+              isFetchingNextPage={isFetchingNextPage}
+              hasNextPage={hasNextPage}
+              sortBy={sortBy}
+              emptyLabel={localize('com_ui_no_project_chats')}
+              loadMore={() => fetchNextPage()}
             />
-          </div>
-          <ProjectChatList
-            conversations={conversations}
-            isLoading={isConversationsLoading}
-            isFetchingNextPage={isFetchingNextPage}
-            hasNextPage={hasNextPage}
-            sortBy={sortBy}
-            emptyLabel={localize('com_ui_no_project_chats')}
-            loadMore={() => fetchNextPage()}
-          />
-        </section>
+          </section>
+        ) : (
+          <section className="mt-6 flex min-h-0 flex-1 flex-col">
+            <KnowledgeSection project={project} />
+          </section>
+        )}
       </div>
     </main>
   );

@@ -110,12 +110,12 @@ export async function buildAgentScopedContext({
         return [agentId, ''] as const;
       }
 
-      const context = await extractFileContext({
+      const { text } = await extractFileContext({
         attachments,
         req,
         tokenCountFn,
       });
-      return [agentId, context ?? ''] as const;
+      return [agentId, text ?? ''] as const;
     }),
   );
 

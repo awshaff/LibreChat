@@ -13,6 +13,7 @@ const {
   sendUploadPolicyError,
   resolveUploadErrorMessage,
   verifyAgentUploadPermission,
+  verifyProjectUploadPermission,
   createCodeExecutionRouteKey,
   getCodeExecutionBaseUrl,
   assertUploadContentAllowed,
@@ -250,6 +251,36 @@ router.delete('/', async (req, res) => {
         files: agentFiles,
       });
       res.status(200).json({ message: 'File associations removed successfully from agent' });
+      return;
+    }
+
+    if (req.body.chatProjectId && req.body.tool_resource) {
+      if (req.body.tool_resource !== EToolResources.context) {
+        return res.status(400).json({ message: 'Invalid project tool resource' });
+      }
+
+      const project = await db.getChatProject(req.user.id, req.body.chatProjectId);
+      if (!project) {
+        return res.status(404).json({ message: 'Project not found' });
+      }
+
+      const projectFiles = dbFiles.filter(
+        (file) =>
+          file.chatProjectId === req.body.chatProjectId &&
+          file.user.toString() === req.user.id.toString(),
+      );
+      if (projectFiles.length === 0) {
+        res.status(200).json({ message: 'File associations removed successfully from project' });
+        return;
+      }
+
+      await Promise.all(
+        projectFiles.map((file) =>
+          db.removeChatProjectKnowledgeFile(req.user.id, req.body.chatProjectId, file.file_id),
+        ),
+      );
+      const result = await processDeleteRequest({ req, files: projectFiles });
+      sendDeleteResult(result, 'Files removed from project successfully');
       return;
     }
 
@@ -779,6 +810,16 @@ router.post('/', async (req, res) => {
       if (denied) {
         return;
       }
+    }
+
+    const projectUploadDenied = await verifyProjectUploadPermission({
+      req,
+      res,
+      metadata,
+      getChatProject: db.getChatProject,
+    });
+    if (projectUploadDenied) {
+      return;
     }
 
     openSseStreamIfRequested();

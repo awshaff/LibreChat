@@ -984,6 +984,17 @@ export function assignConversationToProject(
   });
 }
 
+export function getProjectFiles(projectId: string): Promise<f.TFile[]> {
+  return request.get(endpoints.projectFiles(projectId));
+}
+
+export function getProjectKnowledgeBudget(
+  projectId: string,
+  params: q.TProjectKnowledgeBudgetParams,
+): Promise<q.TProjectKnowledgeBudgetResponse> {
+  return request.get(endpoints.projectKnowledgeBudget(projectId, params));
+}
+
 export function pinConversation(
   payload: t.TPinConversationRequest,
 ): Promise<t.TPinConversationResponse> {
