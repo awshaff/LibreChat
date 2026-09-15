@@ -88,6 +88,7 @@ export async function buildProjectKnowledgeContext({
           filename: 1,
           source: 1,
           text: 1,
+          llmDeliveryPath: 1,
         },
       )) ?? [];
 

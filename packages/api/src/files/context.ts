@@ -1,6 +1,5 @@
 import { logger } from '@librechat/data-schemas';
 import { FileSources, mergeFileConfig } from 'librechat-data-provider';
-import type { IMongoFile } from '@librechat/data-schemas';
 import type { TFile } from 'librechat-data-provider';
 import type { TokenCountFn } from '~/utils/text';
 import type { ServerRequest } from '~/types';
@@ -55,7 +54,10 @@ export async function extractFileContext({
   tokenCountFn,
   fileTokenLimit: fileTokenLimitOverride,
 }: {
-  attachments: IMongoFile[];
+  attachments: readonly (Pick<TFile, 'text' | 'filename'> & {
+    source?: string;
+    llmDeliveryPath?: string;
+  })[];
   req?: ServerRequest;
   tokenCountFn: TokenCountFn;
   fileTokenLimit?: number;
@@ -78,7 +80,12 @@ export async function extractFileContext({
 
   for (const file of attachments) {
     const source = file.source ?? FileSources.local;
-    if (source === FileSources.text && file.text) {
+    if (file.llmDeliveryPath === 'none') {
+      continue;
+    }
+
+    const hasTextDelivery = file.llmDeliveryPath === 'text' || source === FileSources.text;
+    if (hasTextDelivery && file.text) {
       const { text: limitedText, wasTruncated: fileWasTruncated } = await processTextWithTokenLimit(
         {
           text: file.text,

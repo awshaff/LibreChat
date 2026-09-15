@@ -1,6 +1,5 @@
 import { EModelEndpoint } from 'librechat-data-provider';
 import { isValidObjectIdString, logger } from '@librechat/data-schemas';
-
 import type {
   ChatProjectMethods,
   ChatProjectSortBy,
@@ -11,6 +10,7 @@ import type {
 } from '@librechat/data-schemas';
 import type { Request, Response } from 'express';
 import type { FilterQuery } from 'mongoose';
+import { normalizeLimit, queryString } from '~/utils';
 import { getModelMaxTokens } from '~/utils/tokens';
 import { countTokens } from '~/utils/tokenizer';
 
@@ -48,26 +48,8 @@ type ProjectHandlerDependencies = Pick<
 
 const getUserId = (req: ProjectRequest): string => req.user?.id ?? req.user?._id?.toString() ?? '';
 
-const queryString = (value: Request['query'][string]): string | undefined => {
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return queryString(value[0]);
-  }
-  return undefined;
-};
-
 const normalizeString = (value: string | null | undefined): string =>
   typeof value === 'string' ? value.trim() : '';
-
-const normalizeLimit = (value: Request['query'][string]): number => {
-  const limit = parseInt(queryString(value) ?? '', 10);
-  if (!Number.isFinite(limit)) {
-    return 25;
-  }
-  return Math.min(Math.max(limit, 1), 100);
-};
 
 const normalizeSortBy = (value: Request['query'][string]): ChatProjectSortBy | undefined => {
   const sortBy = queryString(value);
