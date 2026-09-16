@@ -1049,9 +1049,8 @@ export function getProjectFiles(projectId: string): Promise<f.TFile[]> {
 
 export function getProjectKnowledgeBudget(
   projectId: string,
-  params: q.TProjectKnowledgeBudgetParams,
 ): Promise<q.TProjectKnowledgeBudgetResponse> {
-  return request.get(endpoints.projectKnowledgeBudget(projectId, params));
+  return request.get(endpoints.projectKnowledgeBudget(projectId));
 }
 
 export function pinConversation(

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useProjectKnowledgeBudgetQuery } from '~/data-provider';
+import { useProjectKnowledgeBudgetQuery, useTokenConfigQuery } from '~/data-provider';
 import ModelPicker, { type ModelSelection } from './ModelPicker';
 import Gauge from '~/components/Chat/Input/TokenUsage/Gauge';
 import { useLocalize } from '~/hooks';
@@ -9,13 +9,14 @@ export default function Budget({ projectId }: { projectId: string }) {
   const localize = useLocalize();
   const [selection, setSelection] = useState<ModelSelection | null>(null);
 
-  const { data } = useProjectKnowledgeBudgetQuery(
-    projectId,
-    { endpoint: selection?.endpoint ?? '', model: selection?.model ?? '' },
-    { enabled: Boolean(selection?.endpoint && selection?.model) },
-  );
-
-  const maxContextTokens = data?.maxContextTokens ?? null;
+  const { data } = useProjectKnowledgeBudgetQuery(projectId);
+  /** Same source the chat composer's own gauge reads (`useTokenLimits`) — it already
+   *  resolves custom endpoints and fetched/yaml token-config overrides that a bare
+   *  `getModelMaxTokens(model, endpoint)` call misses. */
+  const { data: tokenConfig } = useTokenConfigQuery();
+  const maxContextTokens = selection
+    ? (tokenConfig?.[selection.endpoint]?.[selection.model]?.context ?? null)
+    : null;
   const totalTokens = data?.totalTokens ?? 0;
   const indeterminate = maxContextTokens == null;
   const percent = indeterminate ? 0 : Math.min(100, (totalTokens / maxContextTokens) * 100);

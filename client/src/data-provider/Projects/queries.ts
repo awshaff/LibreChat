@@ -3,7 +3,6 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import type {
   ProjectListParams,
   ProjectListResponse,
-  TProjectKnowledgeBudgetParams,
   TProjectKnowledgeBudgetResponse,
   TChatProject,
   TFile,
@@ -72,14 +71,13 @@ export const useProjectKnowledgeFilesQuery = (
 
 export const useProjectKnowledgeBudgetQuery = (
   projectId: string | null | undefined,
-  params: TProjectKnowledgeBudgetParams,
   config?: UseQueryOptions<TProjectKnowledgeBudgetResponse>,
 ): QueryObserverResult<TProjectKnowledgeBudgetResponse, unknown> => {
   return useQuery<TProjectKnowledgeBudgetResponse>(
-    [QueryKeys.projectKnowledgeBudget, projectId, params.endpoint, params.model],
-    () => dataService.getProjectKnowledgeBudget(projectId ?? '', params),
+    [QueryKeys.projectKnowledgeBudget, projectId],
+    () => dataService.getProjectKnowledgeBudget(projectId ?? ''),
     {
-      enabled: Boolean(projectId) && Boolean(params.endpoint) && Boolean(params.model),
+      enabled: Boolean(projectId),
       refetchOnWindowFocus: false,
       ...config,
     },

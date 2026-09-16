@@ -173,8 +173,8 @@ export const projectConversation = (conversationId: string) =>
 
 export const projectFiles = (id: string) => `${projectsRoot}/${encodeURIComponent(id)}/files`;
 
-export const projectKnowledgeBudget = (id: string, params: { endpoint: string; model: string }) =>
-  `${projectsRoot}/${encodeURIComponent(id)}/knowledge/budget${buildQuery(params)}`;
+export const projectKnowledgeBudget = (id: string) =>
+  `${projectsRoot}/${encodeURIComponent(id)}/knowledge/budget`;
 
 export const search = (q: string, cursor?: string | null) =>
   `${BASE_URL}/api/search?q=${q}${cursor ? `&cursor=${cursor}` : ''}`;

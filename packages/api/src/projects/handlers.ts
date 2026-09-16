@@ -1,4 +1,3 @@
-import { EModelEndpoint } from 'librechat-data-provider';
 import { isValidObjectIdString, logger } from '@librechat/data-schemas';
 import type {
   ChatProjectMethods,
@@ -11,7 +10,6 @@ import type {
 import type { Request, Response } from 'express';
 import type { FilterQuery } from 'mongoose';
 import { normalizeLimit, queryString } from '~/utils';
-import { getModelMaxTokens } from '~/utils/tokens';
 import { countTokens } from '~/utils/tokenizer';
 
 const PROJECT_NOT_FOUND = 'Project not found';
@@ -249,12 +247,6 @@ export function createProjectHandlers(deps: ProjectHandlerDependencies): {
       return res.status(404).json({ error: PROJECT_NOT_FOUND });
     }
 
-    const model = queryString(req.query.model);
-    const endpoint = queryString(req.query.endpoint);
-    if (!model || !endpoint) {
-      return res.status(400).json({ error: 'model and endpoint are required' });
-    }
-
     try {
       const userId = getUserId(req);
       const project = await deps.getChatProject(userId, projectId);
@@ -285,13 +277,11 @@ export function createProjectHandlers(deps: ProjectHandlerDependencies): {
 
       const totalTokens =
         instructionsTokens + fileBreakdown.reduce((sum, file) => sum + file.tokens, 0);
-      const maxContextTokens = getModelMaxTokens(model, endpoint as EModelEndpoint);
 
       return res.status(200).json({
         instructionsTokens,
         files: fileBreakdown,
         totalTokens,
-        maxContextTokens: maxContextTokens ?? null,
       });
     } catch (error) {
       logger.error('[projects] Error computing project knowledge budget', error);

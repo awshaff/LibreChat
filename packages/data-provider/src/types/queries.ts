@@ -65,11 +65,6 @@ export type ProjectListResponse = {
 
 export type ProjectData = InfiniteData<ProjectListResponse>;
 
-export type TProjectKnowledgeBudgetParams = {
-  endpoint: string;
-  model: string;
-};
-
 export type TProjectKnowledgeFileBudget = {
   file_id: string;
   filename: string;
@@ -80,7 +75,6 @@ export type TProjectKnowledgeBudgetResponse = {
   instructionsTokens: number;
   files: TProjectKnowledgeFileBudget[];
   totalTokens: number;
-  maxContextTokens: number | null;
 };
 
 /* Messages */
